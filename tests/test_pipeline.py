@@ -1,10 +1,16 @@
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
+from aiogram import Bot
+from aiogram.types import Message
 
+from immich_tg_bot.bot import _extract_ingest_item
+from immich_tg_bot.config import Settings
 from immich_tg_bot.pipeline import IngestionPipeline, IngestItem
 from immich_tg_bot.state import State
 
@@ -24,6 +30,98 @@ def fake_immich() -> AsyncMock:
     client.upload_asset.return_value = {"id": "asset-123", "status": "created"}
     client.add_to_album.return_value = None
     return client
+
+
+@pytest.mark.parametrize(
+    ("original_name", "rendered_name", "expected_upload"),
+    [
+        ("trip.tar.gz", "Alice_42.gz", "photo.jpg"),
+        ("photo.jpg", "Alice.zip", "Alice.zip"),
+    ],
+)
+async def test_ingest_uses_original_filename_to_identify_archives(
+    tmp_path: Path,
+    state: State,
+    fake_immich: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+    original_name: str,
+    rendered_name: str,
+    expected_upload: str,
+) -> None:
+    cached = tmp_path / "file_0"
+    cached.write_bytes(b"payload")
+
+    async def fake_subprocess(*args: str, **kwargs: Any) -> SimpleNamespace:
+        (Path(args[-1]) / "photo.jpg").write_bytes(b"extracted image")
+        return SimpleNamespace(returncode=0, communicate=AsyncMock(return_value=(b"", b"")))
+
+    monkeypatch.setattr("asyncio.create_subprocess_exec", fake_subprocess)
+    item = IngestItem(
+        chat_id=1001,
+        message_id=2001,
+        local_path=cached,
+        file_name=rendered_name,
+        created_at=datetime.now(UTC),
+        original_file_name=original_name,
+    )
+    summary = await IngestionPipeline(immich=fake_immich, state=state).ingest([item])
+
+    assert summary.uploaded == 1
+    assert summary.errors == 0
+    assert fake_immich.upload_asset.call_args.kwargs["file_name"] == expected_upload
+
+
+@pytest.mark.parametrize(
+    ("original_name", "cached_name", "mime_type"),
+    [
+        ("trip", "file_0.zip", None),
+        ("trip", "file_0", "application/zip"),
+        (None, "file_0", "application/zip"),
+    ],
+)
+async def test_ingest_document_uses_inferred_archive_extension(
+    tmp_path: Path,
+    state: State,
+    fake_immich: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+    original_name: str | None,
+    cached_name: str,
+    mime_type: str | None,
+) -> None:
+    cached = tmp_path / cached_name
+    cached.write_bytes(b"archive payload")
+    bot = cast(
+        Bot,
+        SimpleNamespace(get_file=AsyncMock(return_value=SimpleNamespace(file_path=str(cached)))),
+    )
+    message = Message.model_validate(
+        {
+            "message_id": 42,
+            "date": 1792573200,
+            "chat": {"id": 123, "type": "private", "first_name": "Alice"},
+            "document": {
+                "file_id": "file-id",
+                "file_unique_id": "unique-id",
+                "file_name": original_name,
+                "mime_type": mime_type,
+            },
+        }
+    )
+
+    async def fake_subprocess(*args: str, **kwargs: Any) -> SimpleNamespace:
+        (Path(args[-1]) / "photo.jpg").write_bytes(b"extracted image")
+        return SimpleNamespace(returncode=0, communicate=AsyncMock(return_value=(b"", b"")))
+
+    monkeypatch.setattr("asyncio.create_subprocess_exec", fake_subprocess)
+    item = await _extract_ingest_item(
+        bot, message, tmp_path, settings=Settings.model_construct(tz="UTC")
+    )
+    assert item is not None
+    summary = await IngestionPipeline(immich=fake_immich, state=state).ingest([item])
+
+    assert summary.uploaded == 1
+    assert summary.errors == 0
+    assert fake_immich.upload_asset.call_args.kwargs["file_name"] == "photo.jpg"
 
 
 @pytest.mark.asyncio

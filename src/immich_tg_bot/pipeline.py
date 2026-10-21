@@ -30,6 +30,7 @@ class IngestItem:
     file_name: str
     created_at: datetime
     target_album: str | None = None
+    original_file_name: str | None = None
 
 
 @dataclass
@@ -136,7 +137,7 @@ class IngestionPipeline:
 
         prefix = f"telegram:{item.chat_id}:{item.message_id}"
 
-        if is_archive(item.file_name):
+        if is_archive(item.original_file_name or item.file_name):
             with tempfile.TemporaryDirectory(prefix="tg-archive-") as tmpdir:
                 tmp = Path(tmpdir)
                 try:

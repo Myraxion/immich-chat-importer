@@ -1,6 +1,9 @@
+import logging
 from datetime import UTC, datetime
 from unittest.mock import MagicMock
 from zoneinfo import ZoneInfo
+
+import pytest
 
 from immich_tg_bot.naming import (
     MessageMetadata,
@@ -98,6 +101,32 @@ def test_render_stem_falls_back_on_malformed_syntax_or_type_error() -> None:
     assert render_stem(broken_template, meta, default_template=default_template) == "MySource_55_1"
 
 
+@pytest.mark.parametrize(
+    ("template", "expected", "warnings"),
+    [
+        ("{soruce}_{message_id}", "42", ["Unknown template variable 'soruce'"]),
+        ("photo_{exif_date:%Y%m%d}", "photo", []),
+    ],
+)
+def test_render_stem_warns_only_for_unknown_variables(
+    caplog: pytest.LogCaptureFixture, template: str, expected: str, warnings: list[str]
+) -> None:
+    meta = MessageMetadata(
+        source="Alice",
+        source_id="123",
+        source_username="",
+        message_id="42",
+        date=datetime(2026, 10, 21, tzinfo=UTC),
+        sender="Alice",
+    )
+
+    with caplog.at_level(logging.WARNING, logger="immich_tg_bot.naming"):
+        result = render_stem(template, meta, default_template="{source}_{message_id}_{index}")
+
+    assert result == expected
+    assert caplog.messages == warnings
+
+
 def test_resolve_filename_appends_extension() -> None:
     meta = MessageMetadata(
         source="Channel",
@@ -140,6 +169,21 @@ def test_disambiguate_filenames_prevents_secondary_collisions() -> None:
     disambiguated = disambiguate_filenames(items)
     assert len(set(disambiguated)) == 3
     assert "photo_1.jpg" in disambiguated
+
+
+@pytest.mark.parametrize(
+    ("filename", "expected"),
+    [
+        ("holiday.2026.jpg", ["holiday.2026_1.jpg", "holiday.2026_2.jpg"]),
+        ("trip.tar.gz", ["trip_1.tar.gz", "trip_2.tar.gz"]),
+        ("trip.tar.bz2", ["trip_1.tar.bz2", "trip_2.tar.bz2"]),
+        ("trip.TAR.XZ", ["trip_1.TAR.XZ", "trip_2.TAR.XZ"]),
+    ],
+)
+def test_disambiguate_filenames_preserves_stem_and_extension(
+    filename: str, expected: list[str]
+) -> None:
+    assert disambiguate_filenames([filename, filename]) == expected
 
 
 def test_extract_metadata_from_aiogram_channel_forward() -> None:

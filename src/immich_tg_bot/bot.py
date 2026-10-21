@@ -18,7 +18,13 @@ from aiogram.types import Message, TelegramObject
 from .config import Settings
 from .i18n import resolve_language, t
 from .immich import ImmichClient
-from .naming import disambiguate_filenames, extract_metadata, resolve_album_name, resolve_filename
+from .naming import (
+    disambiguate_filenames,
+    extract_metadata,
+    resolve_album_name,
+    resolve_filename,
+    split_filename,
+)
 from .pipeline import IngestionPipeline, IngestItem, IngestSummary, _exif_datetime
 from .state import State
 
@@ -134,6 +140,7 @@ async def _extract_ingest_item(
     if not file_id:
         return None
     local = await _resolve_local_path(bot, file_id, tg_files_dir)
+    original_file_name = original_name or local.name
     fallback_dt = message.date.astimezone(UTC) if message.date else datetime.now(UTC)
 
     if settings is None:
@@ -143,7 +150,7 @@ async def _extract_ingest_item(
         from zoneinfo import ZoneInfo
 
         target_tz = ZoneInfo(settings.tz)
-        ext = Path(original_name).suffix or local.suffix
+        ext = split_filename(original_name)[1] or split_filename(local.name)[1]
         if not ext:
             media = getattr(message, media_type, None)
             mime_type = getattr(media, "mime_type", None)
@@ -151,6 +158,8 @@ async def _extract_ingest_item(
                 ext = mimetypes.guess_extension(mime_type) or ""
             elif media_type == "video_note":
                 ext = ".mp4"
+        if not split_filename(original_file_name)[1]:
+            original_file_name += ext
         exif_dt = _exif_datetime(local)
         meta = extract_metadata(
             message,
@@ -183,6 +192,7 @@ async def _extract_ingest_item(
         file_name=file_name,
         created_at=fallback_dt,
         target_album=target_album,
+        original_file_name=original_file_name,
     )
 
 
@@ -307,6 +317,7 @@ async def run_bot(settings: Settings) -> None:
                 file_name=final_fn,
                 created_at=it.created_at,
                 target_album=it.target_album,
+                original_file_name=it.original_file_name,
             )
             for (it, _), final_fn in zip(raw_items, disambiguated, strict=False)
         ]

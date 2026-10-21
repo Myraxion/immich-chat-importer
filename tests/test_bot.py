@@ -220,3 +220,49 @@ def test_format_summary_reply_languages() -> None:
     # 7. fallback when unsupported or None
     assert "Uploaded: 3" in format_summary_reply(s1, lang_code="fr", default_lang="en")
     assert "Загружено: 3" in format_summary_reply(s1, lang_code=None, default_lang="ru")
+
+
+@pytest.mark.parametrize(
+    ("original_name", "template", "expected"),
+    [
+        ("trip.tar.gz", "{source}_{message_id}", "Alice_42.tar.gz"),
+        ("trip.tar.bz2", "{source}_{message_id}", "Alice_42.tar.bz2"),
+        ("trip.TAR.XZ", "{source}_{message_id}", "Alice_42.TAR.XZ"),
+        ("trip.tar.gz", "{original_name}", "trip.tar.gz"),
+        ("trip.tar.gz", "{source}_{original_name}", "Alice_trip.tar.gz"),
+        ("holiday.2026.jpg", "{original_name}", "holiday.2026.jpg"),
+    ],
+)
+async def test_extract_ingest_item_preserves_document_extension(
+    tmp_path: Path, original_name: str, template: str, expected: str
+) -> None:
+    from aiogram.types import Message
+
+    from immich_tg_bot.bot import _extract_ingest_item
+    from immich_tg_bot.config import Settings
+
+    cached = tmp_path / "file_0"
+    cached.touch()
+    message = Message.model_validate(
+        {
+            "message_id": 42,
+            "date": 1792573200,
+            "chat": {"id": 123, "type": "private", "first_name": "Alice"},
+            "document": {
+                "file_id": "file-id",
+                "file_unique_id": "unique-id",
+                "file_name": original_name,
+            },
+        }
+    )
+    bot = cast(Bot, FakeBot("test_bot", str(cached)))
+    item = await _extract_ingest_item(
+        bot,
+        message,
+        tmp_path,
+        settings=Settings.model_construct(tz="UTC", document_name_template=template),
+    )
+
+    assert item is not None
+    assert item.file_name == expected
+    assert item.original_file_name == original_name

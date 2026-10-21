@@ -10,6 +10,8 @@ from zoneinfo import ZoneInfo
 
 from aiogram.types import Message
 
+from .archives import ARCHIVE_EXTENSIONS
+
 log = logging.getLogger(__name__)
 
 
@@ -51,6 +53,7 @@ class _Empty:
 
 class _SafeDict(dict[str, Any]):
     def __missing__(self, key: str) -> Any:
+        log.warning("Unknown template variable %r", key)
         return _Empty()
 
 
@@ -151,6 +154,15 @@ def resolve_album_name(
     return stem.strip()
 
 
+def split_filename(filename: str) -> tuple[str, str]:
+    """Split a filename, retaining known compound archive extensions and their case."""
+    path = Path(filename)
+    for extension in ARCHIVE_EXTENSIONS:
+        if extension.count(".") > 1 and path.name.lower().endswith(extension):
+            return path.name[: -len(extension)], path.name[-len(extension) :]
+    return path.stem, path.suffix
+
+
 def disambiguate_filenames(filenames: Sequence[str]) -> list[str]:
     counts = Counter(filenames)
     if not any(c > 1 for c in counts.values()):
@@ -166,9 +178,7 @@ def disambiguate_filenames(filenames: Sequence[str]) -> list[str]:
             result.append(fn)
             continue
 
-        p = Path(fn)
-        stem = p.stem
-        ext = "".join(p.suffixes)
+        stem, ext = split_filename(fn)
         idx = counters.get(fn, 1)
         candidate = f"{stem}_{idx}{ext}"
         while candidate in allocated or (candidate in counts and counts[candidate] == 1):
@@ -292,7 +302,7 @@ def extract_metadata(
     exif_dt = exif_date.astimezone(target_tz) if exif_date else None
 
     # Strip extension from original_name if provided
-    stem_original = Path(original_name).stem if original_name else ""
+    stem_original = split_filename(original_name)[0] if original_name else ""
 
     return MessageMetadata(
         source=source,
