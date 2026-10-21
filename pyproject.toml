@@ -1,6 +1,6 @@
 [project]
 name = "immich-telegram-bot"
-version = "0.1.4"
+version = "0.1.5"
 description = "Telegram bot that uploads forwarded photos, videos and archives to an Immich instance."
 readme = "README.md"
 

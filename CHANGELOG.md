@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5] - 2026-10-21
+
+### 🛠️ 修复媒体上传失败
+
+- 修复 Telegram 缓存文件没有扩展名时，上传至 Immich 返回 `400 Bad Request / Unsupported file type` 的问题。
+- 上传文件名优先保留原始扩展名，其次使用缓存扩展名；缺失时根据 MIME 类型补齐，视频便笺默认使用 `.mp4`。
+
+### 🐳 修复大文件下载配置
+
+- 将 Compose 中的 `command: --local` 替换为 `TELEGRAM_LOCAL: "1"`，确保 `aiogram/telegram-bot-api` 实际启用本地模式，解决因模式未启用导致的 `file is too big` 错误。
+- **升级提示**：已有部署需要同步修改 Compose 配置，并重新创建 `telegram-bot-api` 容器，仅更新机器人镜像无法修复此问题。
+
+[完整变更](https://github.com/Myraxion/immich-telegram-bot/compare/v0.1.4...v0.1.5)
+
 ## [0.1.4] - 2026-09-25
 
 ### Added
