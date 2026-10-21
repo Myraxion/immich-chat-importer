@@ -6,8 +6,8 @@ services:
     environment:
       TELEGRAM_API_ID: ${TELEGRAM_API_ID}
       TELEGRAM_API_HASH: ${TELEGRAM_API_HASH}
+      TELEGRAM_LOCAL: "1"
       TZ: ${TZ:-UTC}
-    command: --local
     volumes:
       - tg-files:/var/lib/telegram-bot-api
 

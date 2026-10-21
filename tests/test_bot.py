@@ -129,6 +129,58 @@ async def test_extract_ingest_item_from_photo_uses_dynamic_naming(tmp_path: Path
     assert item.target_album == "MyChat"
 
 
+@pytest.mark.parametrize(
+    ("media_type", "original_name", "mime_type", "cached_name", "expected_suffix"),
+    [
+        ("video", "clip.mp4", "video/mp4", "file_154", ".mp4"),
+        ("video", None, "video/mp4", "file_154", ".mp4"),
+        ("video", "clip.mov", "video/quicktime", "file_154.mp4", ".mov"),
+        ("animation", None, "image/gif", "file_154", ".gif"),
+        ("video_note", None, None, "file_154", ".mp4"),
+    ],
+)
+async def test_extract_ingest_item_preserves_media_extension(
+    tmp_path: Path,
+    media_type: str,
+    original_name: str | None,
+    mime_type: str | None,
+    cached_name: str,
+    expected_suffix: str,
+) -> None:
+    from aiogram.types import Message
+
+    from immich_tg_bot.bot import _extract_ingest_item
+    from immich_tg_bot.config import Settings
+
+    cached = tmp_path / cached_name
+    cached.touch()
+    media = {
+        "file_id": "file-id",
+        "file_unique_id": "unique-id",
+        "width": 1,
+        "height": 1,
+        "length": 1,
+        "duration": 1,
+        "file_name": original_name,
+        "mime_type": mime_type,
+    }
+    message = Message.model_validate(
+        {
+            "message_id": 341,
+            "date": 1792573200,
+            "chat": {"id": 123, "type": "private", "first_name": "Test"},
+            media_type: media,
+        }
+    )
+    bot = cast(Bot, FakeBot("test_bot", str(cached)))
+    item = await _extract_ingest_item(
+        bot, message, tmp_path, settings=Settings.model_construct(tz="UTC")
+    )
+
+    assert item is not None
+    assert Path(item.file_name).suffix == expected_suffix
+
+
 def test_format_summary_reply_languages() -> None:
     from immich_tg_bot.bot import format_summary_reply
     from immich_tg_bot.pipeline import IngestSummary

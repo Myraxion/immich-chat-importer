@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import mimetypes
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from datetime import UTC, datetime
@@ -142,11 +143,14 @@ async def _extract_ingest_item(
         from zoneinfo import ZoneInfo
 
         target_tz = ZoneInfo(settings.tz)
-        ext = (
-            Path(original_name).suffix
-            if (media_type == "document" and original_name)
-            else local.suffix
-        )
+        ext = Path(original_name).suffix or local.suffix
+        if not ext:
+            media = getattr(message, media_type, None)
+            mime_type = getattr(media, "mime_type", None)
+            if mime_type:
+                ext = mimetypes.guess_extension(mime_type) or ""
+            elif media_type == "video_note":
+                ext = ".mp4"
         exif_dt = _exif_datetime(local)
         meta = extract_metadata(
             message,
