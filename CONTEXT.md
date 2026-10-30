@@ -10,6 +10,14 @@ Telegram bot that ingests forwarded photos, videos, documents, and archives into
 A single inbound file or media payload designated for upload.
 _Avoid_: UploadTask, Job, FileMessage
 
+**IngestBatch**:
+A set of ingestion items processed together for one import request, with a combined status outcome. A batch may succeed partially without undoing the assets already imported.
+_Avoid_: UploadJob, ImportTransaction
+
+**IngestRecord**:
+The queryable status and outcome of one ingestion batch, belonging to the user who requested the import. An interrupted record describes unfinished work and does not imply automatic resumption.
+_Avoid_: RecoveryTask, ResumeJob
+
 **IngestionPipeline**:
 The pipeline coordinating end-to-end asset ingestion, metadata resolution, deduplication, and album association.
 _Avoid_: IngestionService, Uploader, ProcessingManager
@@ -19,7 +27,7 @@ The aggregated status outcome of a processed batch of ingestion items.
 _Avoid_: UploadResult, ProcessResponse
 
 **Deduplication**:
-The two-phase identity and content verification ensuring assets and messages are not uploaded repeatedly.
+The recognition of previously imported source files and identical file contents, so repeated imports across messaging platforms share one Immich asset. Files with different contents remain distinct even when they look alike.
 _Avoid_: DedupCheck, Filter
 
 ### Naming and Organization
@@ -29,11 +37,11 @@ A parameterized template string resolved against message metadata to generate hu
 _Avoid_: FilePattern, NameFormat, Rule
 
 **MessageMetadata**:
-The normalized context extracted from a Telegram message (sender, chat, forward origin, timestamp, caption, index) used for dynamic naming and album routing.
+The normalized context of a source message (author, chat, origin, timestamp, caption, index) used for dynamic naming and album routing, independent of its messaging platform.
 _Avoid_: TelegramContext, OriginInfo, MessageData
 
 **AlbumRouting**:
-The dynamic resolution of target Immich albums evaluated per ingestion item, with batch grouping and static fallback.
+The resolution of target Immich albums for an import, with template-based selection and a static fallback. An existing asset can be associated with a new target album without creating another copy of the asset.
 _Avoid_: AlbumMapping, FolderDispatch
 
 ### Localization
