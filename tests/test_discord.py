@@ -244,3 +244,66 @@ async def test_menu_denies_caller_even_when_author_is_allowed(tmp_path):
         {"ephemeral": True, "thinking": True},
         "You are not authorized to import media.",
     ]
+
+
+async def test_dm_imports_real_archive(tmp_path, monkeypatch):
+    import io
+    import zipfile
+
+    data = io.BytesIO()
+    with zipfile.ZipFile(data, "w") as bundle:
+        bundle.writestr("sub/photo.jpg", b"photo")
+        bundle.writestr("readme.txt", b"readme")
+    uploads = []
+    replies = []
+    original = httpx.AsyncClient
+
+    def immich(request):
+        if request.method == "POST" and request.url.path == "/assets":
+            uploads.append(request.content)
+            return httpx.Response(201, json={"id": "1", "status": "created"})
+        if request.method == "GET":
+            return httpx.Response(200, json=[])
+        if request.method == "PUT":
+            return httpx.Response(200, json=[{"id": "1", "success": True}])
+        return httpx.Response(200, json={"id": "album"})
+
+    monkeypatch.setattr(
+        "immich_tg_bot.immich.httpx.AsyncClient",
+        lambda **kw: original(**kw, transport=httpx.MockTransport(immich)),
+    )
+
+    async def reply(text, **kwargs):
+        replies.append(text)
+
+    message = SimpleNamespace(
+        id=10,
+        channel=SimpleNamespace(id=20),
+        author=SimpleNamespace(id=42, display_name="Alice", name="alice"),
+        created_at=datetime.now(UTC),
+        content="",
+        reply=reply,
+        attachments=[
+            SimpleNamespace(
+                id=1,
+                filename="bundle.zip",
+                size=len(data.getvalue()),
+                url="https://cdn.test/bundle",
+            )
+        ],
+    )
+    settings = Settings.model_construct(
+        data_dir=tmp_path,
+        immich_url="https://immich.test",
+        immich_api_key="key",
+        discord_allowed_user_ids=[42],
+    )
+    async with original(
+        transport=httpx.MockTransport(lambda req: httpx.Response(200, content=data.getvalue()))
+    ) as client:
+        async with ingestion_runtime(settings) as pipeline:
+            await handle_dm(message, settings, pipeline, client)
+    assert len(uploads) == 1
+    assert b"photo.jpg" in uploads[0]
+    assert "readme.txt" in replies[0]
+    assert "Uploaded: 1" in replies[0]

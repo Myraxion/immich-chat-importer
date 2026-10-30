@@ -78,6 +78,7 @@ async def extract(archive: Path, dest: Path) -> None:
         str(archive),
         "-C",
         str(dest),
+        stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -88,8 +89,9 @@ async def extract(archive: Path, dest: Path) -> None:
         )
 
 
-def walk_media(root: Path, max_files: int) -> list[Path]:
+def walk_media(root: Path) -> tuple[list[Path], list[Path]]:
     found: list[Path] = []
+    skipped: list[Path] = []
     for p in root.rglob("*"):
         if not p.is_file():
             continue
@@ -99,7 +101,6 @@ def walk_media(root: Path, max_files: int) -> list[Path]:
             continue
         if p.suffix.lower() in MEDIA_EXTENSIONS:
             found.append(p)
-            if len(found) >= max_files:
-                log.warning("Archive media limit (%d) reached — skipping rest", max_files)
-                break
-    return found
+        else:
+            skipped.append(p)
+    return found, skipped

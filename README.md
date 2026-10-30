@@ -145,7 +145,7 @@ All settings are read from `.env`.
 | `DOCUMENT_NAME_TEMPLATE` |  | `{original_name}` | Dynamic naming template for document files. |
 | `ALBUM_NAME_TEMPLATE` |  | *(empty)* | Dynamic album template (e.g. `{source}`). Falls back to `ALBUM_NAME`. |
 | `MAX_ARCHIVE_MB` |  | `2000` | Hard limit for incoming archive size (MB). |
-| `MAX_ARCHIVE_FILES` |  | `1000` | Hard limit for files extracted from one archive. |
+| `MAX_ARCHIVE_FILES` |  | `1000` | Maximum media entries per archive; archives exceeding it are rejected before upload. |
 | `LOG_LEVEL` |  | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR`. |
 | `DATA_DIR` |  | `/data` | Inside-container path for `state.sqlite`. |
 | `TG_FILES_DIR` |  | `/var/lib/telegram-bot-api` | Inside-container path of the shared local-Bot-API volume. |
@@ -214,8 +214,9 @@ Telegram credentials and the local Telegram Bot API server are unnecessary in th
 Create a Discord bot, install it to an account or server where you can DM it, and
 run `immich-telegram-bot`. Send a photo and a video as attachments in a direct
 message from a whitelisted account. The reply reports the outcome; check the
-Discord Inbox album in Immich for the imported media. Archives, status queries
-and combined container deployment are subsequent work.
+Discord Inbox album in Immich for the imported media. Supported archives can also
+be sent as attachments. Non-media and nested archives are skipped. The attachment
+size and media count limits do not limit total extracted bytes.
 
 Set `DISCORD_FILENAME_TEMPLATE` (default `{original_name}`) and
 `DISCORD_ALBUM_NAME_TEMPLATE` (default empty, falling back to `DISCORD_ALBUM_NAME`)

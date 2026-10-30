@@ -145,7 +145,7 @@ INFO immich_tg_bot.bot: Bot starting (allowed users: [...], album: Telegram Inbo
 | `DOCUMENT_NAME_TEMPLATE` |  | `{original_name}` | 文档文件的动态命名模板。 |
 | `ALBUM_NAME_TEMPLATE` |  | *(留空)* | 动态相册模板（例如 `{source}`）。若未命中则回退至 `ALBUM_NAME`。 |
 | `MAX_ARCHIVE_MB` |  | `2000` | 允许传入的压缩包大小上限（MB）。 |
-| `MAX_ARCHIVE_FILES` |  | `1000` | 单个压缩包解压文件的数量上限。 |
+| `MAX_ARCHIVE_FILES` |  | `1000` | 单个压缩包的媒体条目数量上限；超限时上传前拒绝整个包。 |
 | `LOG_LEVEL` |  | `INFO` | 日志级别：`DEBUG` / `INFO` / `WARNING` / `ERROR`。 |
 | `DATA_DIR` |  | `/data` | 容器内部 `state.sqlite` 的存储路径。 |
 | `TG_FILES_DIR` |  | `/var/lib/telegram-bot-api` | 本地 Bot API 共享卷在容器内的挂载路径。 |

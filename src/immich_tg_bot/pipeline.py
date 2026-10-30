@@ -43,6 +43,7 @@ class IngestSummary:
     errors: int = 0
     new_asset_ids: list[str] = field(default_factory=list)
     error_messages: list[str] = field(default_factory=list)
+    skipped_messages: list[str] = field(default_factory=list)
 
 
 def _exif_datetime(path: Path) -> datetime | None:
@@ -106,7 +107,8 @@ class IngestionPipeline:
 
         for album_key, assets in album_groups.items():
             pending = {
-                asset_id: name for asset_id, name in assets.items()
+                asset_id: name
+                for asset_id, name in assets.items()
                 if not await self._state.album_completed(asset_id, album_key)
             }
             if not pending:
@@ -183,15 +185,27 @@ class IngestionPipeline:
                     await extract(item.local_path, tmp)
                 except Exception as e:
                     log.exception("Extraction failed for %s", item.local_path)
-                    err = f"extract: {e}"
+                    err = f"{item.original_file_name or item.file_name}: extract: {e}"
                     summary.errors += 1
                     summary.error_messages.append(err)
                     item_errors.append(err)
                     return
 
-                media = walk_media(tmp, self._max_archive_files)
+                media, skipped = walk_media(tmp)
+                archive_name = item.original_file_name or item.file_name
+                summary.skipped_messages.extend(
+                    f"{archive_name}: {p.relative_to(tmp).as_posix()}" for p in skipped
+                )
+                if len(media) > self._max_archive_files:
+                    summary.errors += 1
+                    summary.error_messages.append(
+                        f"{archive_name}: archive media count exceeds limit "
+                        f"({self._max_archive_files})"
+                    )
+                    return
                 if not media:
                     log.info("Archive %s contained no recognised media", item.local_path)
+                    summary.skipped_messages.append(f"{archive_name}: no supported media")
                     if legacy:
                         await self._state.mark_processed(
                             item.chat_id, item.message_id, 0, "done", None
@@ -214,6 +228,7 @@ class IngestionPipeline:
                         item_errors=item_errors,
                         album_groups=album_groups,
                         identity=identity,
+                        error_name=f"{archive_name}: {m.relative_to(tmp).as_posix()}",
                     )
         else:
             await self._dispatch_upload(
@@ -251,6 +266,7 @@ class IngestionPipeline:
         album_groups: dict[str, dict[str, str]],
         identity: tuple[str, str, str, str],
         archive_member: bool = False,
+        error_name: str | None = None,
     ) -> None:
         try:
             status, asset_id = await self._upload_one(
@@ -272,7 +288,7 @@ class IngestionPipeline:
                 album_groups[effective_album][asset_id] = file_name
         except Exception as e:
             log.exception("Upload failed for %s", file_path)
-            err = f"{file_name}: upload: {e}"
+            err = f"{error_name or file_name}: upload: {e}"
             summary.errors += 1
             summary.error_messages.append(err)
             item_errors.append(err)

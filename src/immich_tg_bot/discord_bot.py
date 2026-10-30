@@ -10,7 +10,7 @@ import discord
 import httpx
 from discord import app_commands
 
-from .archives import is_media
+from .archives import is_archive, is_media
 from .config import Settings
 from .i18n import resolve_language, t
 from .naming import MessageMetadata, resolve_album_name, resolve_filename, split_filename
@@ -69,7 +69,7 @@ async def process_import(
     download_dir.mkdir(parents=True, exist_ok=True)
     for index, attachment in enumerate(message.attachments, 1):
         name = attachment.filename or str(attachment.id)
-        if not is_media(name):
+        if not (is_media(name) or is_archive(name)):
             skipped.append(name)
             continue
         if attachment.size > limit:
@@ -153,6 +153,7 @@ async def process_import(
             for item in items:
                 item.local_path.unlink(missing_ok=True)
     errors.extend(summary.error_messages)
+    skipped.extend(summary.skipped_messages)
     counts = t(
         "discord_counts",
         lang_code=lang,

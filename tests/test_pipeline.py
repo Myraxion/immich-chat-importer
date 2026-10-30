@@ -922,3 +922,78 @@ async def test_ingest_cleanup_handles_os_error_gracefully(
 
     summary = await pipeline.ingest([item])
     assert summary.uploaded == 1
+
+
+async def test_real_archive_over_limit_rejects_before_upload(tmp_path, state, fake_immich):
+    import zipfile
+
+    archive = tmp_path / "bundle.zip"
+    with zipfile.ZipFile(archive, "w") as bundle:
+        bundle.writestr("a.jpg", b"a")
+        bundle.writestr("sub/b.jpg", b"b")
+    item = IngestItem(
+        1, 2, archive, archive.name, datetime.now(UTC), platform="discord", attachment_id="1"
+    )
+    result = await IngestionPipeline(fake_immich, state, max_archive_files=1).ingest([item])
+    assert result.uploaded == 0
+    assert result.errors == 1
+    assert "bundle.zip" in result.error_messages[0]
+    fake_immich.upload_asset.assert_not_awaited()
+
+
+async def test_real_archive_entries_and_retry(tmp_path, state, fake_immich):
+    import zipfile
+
+    archive = tmp_path / "bundle.zip"
+    with zipfile.ZipFile(archive, "w") as bundle:
+        bundle.writestr("one/photo.jpg", b"first")
+        bundle.writestr("two/photo.jpg", b"second")
+        bundle.writestr("note.txt", b"note")
+        bundle.writestr("nested.zip", b"nested")
+    fake_immich.upload_asset.side_effect = [
+        {"id": "one", "status": "created"},
+        RuntimeError("offline"),
+        {"id": "two", "status": "created"},
+    ]
+    item = IngestItem(
+        1,
+        2,
+        archive,
+        archive.name,
+        datetime.now(UTC),
+        target_album="trip",
+        platform="discord",
+        attachment_id="1",
+    )
+    pipeline = IngestionPipeline(fake_immich, state, max_archive_files=2, cleanup_local=False)
+    first = await pipeline.ingest([item])
+    assert (first.uploaded, first.errors) == (1, 1)
+    assert "photo.jpg" in first.error_messages[0]
+    assert any("note.txt" in x for x in first.skipped_messages)
+    assert any("nested.zip" in x for x in first.skipped_messages)
+    second = await pipeline.ingest([item])
+    assert (second.uploaded, second.duplicates, second.errors) == (1, 1, 0)
+    assert all(
+        call.kwargs["file_name"] == "photo.jpg" for call in fake_immich.upload_asset.await_args_list
+    )
+
+
+async def test_corrupt_and_empty_archive_do_not_block_other_items(tmp_path, state, fake_immich):
+    import zipfile
+
+    corrupt = tmp_path / "bad.zip"
+    corrupt.write_bytes(b"broken")
+    empty = tmp_path / "empty.zip"
+    with zipfile.ZipFile(empty, "w"):
+        pass
+    photo = tmp_path / "photo.jpg"
+    photo.write_bytes(b"photo")
+    now = datetime.now(UTC)
+    items = [
+        IngestItem(1, 2, path, path.name, now, platform="discord", attachment_id=str(i))
+        for i, path in enumerate((corrupt, empty, photo))
+    ]
+    result = await IngestionPipeline(fake_immich, state).ingest(items)
+    assert (result.uploaded, result.errors) == (1, 1)
+    assert "bad.zip" in result.error_messages[0]
+    assert any("empty.zip" in x and "no supported media" in x for x in result.skipped_messages)
