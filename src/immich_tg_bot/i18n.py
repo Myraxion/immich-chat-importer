@@ -3,6 +3,15 @@ from typing import Any
 SUPPORTED_LANGUAGES: tuple[str, ...] = ("en", "zh", "ja", "ru")
 
 _MESSAGES: dict[str, dict[str, str]] = {
+    "stage_upload": {"en": "upload", "zh": "上传", "ja": "アップロード", "ru": "загрузка"},
+    "stage_album_lookup": {
+        "en": "album lookup/create", "zh": "查找或创建相册",
+        "ja": "アルバムの検索・作成", "ru": "поиск или создание альбома",
+    },
+    "stage_album_association": {
+        "en": "album association", "zh": "关联相册",
+        "ja": "アルバムへの追加", "ru": "добавление в альбом",
+    },
     "start": {
         "en": (
             "👋 Hello! Forward photos, videos, files, and archives to me — "

@@ -202,10 +202,31 @@ def format_summary_reply(
     lang_code: str | None = None,
     default_lang: str = "en",
 ) -> str:
-    reply = _format_summary_counts(summary, resolve_errors, lang_code, default_lang)
+    return format_summary_replies(summary, resolve_errors, lang_code, default_lang)[0]
+
+
+def format_summary_replies(
+    summary: IngestSummary,
+    resolve_errors: int = 0,
+    lang_code: str | None = None,
+    default_lang: str = "en",
+) -> list[str]:
+    replies = [_format_summary_counts(summary, resolve_errors, lang_code, default_lang)]
     if summary.error_messages:
-        reply += "\n" + "\n".join(html.escape(message) for message in summary.error_messages)
-    return reply
+        language = resolve_language(lang_code, default_lang=default_lang)
+        for message in summary.error_messages:
+            for stage, key in (
+                ("album lookup/create", "stage_album_lookup"),
+                ("album association", "stage_album_association"),
+                ("upload", "stage_upload"),
+            ):
+                message = message.replace(f": {stage}", f": {t(key, lang_code=language)}", 1)
+            detail = html.escape(message[:600])
+            if len((replies[-1] + "\n" + detail).encode("utf-16-le")) // 2 > 4000:
+                replies.append(detail)
+            else:
+                replies[-1] += "\n" + detail
+    return replies
 
 
 def _format_summary_counts(
@@ -313,13 +334,14 @@ async def run_bot(settings: Settings, pipeline: IngestionPipeline | None = None)
         ]
 
         summary = await pipeline.ingest(items)
-        reply_text = format_summary_reply(
+        reply_texts = format_summary_replies(
             summary,
             resolve_errors=resolve_errors,
             lang_code=head_lang,
             default_lang=settings.default_language,
         )
-        await head.reply(reply_text)
+        for reply_text in reply_texts:
+            await head.reply(reply_text)
 
     async def _flush_group(mg_id: str) -> None:
         try:

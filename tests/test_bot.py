@@ -232,6 +232,19 @@ def test_summary_reply_includes_escaped_stage_and_file_context() -> None:
     reply = format_summary_reply(summary, lang_code="en")
     assert "Uploaded: 1" in reply
     assert "photo&lt;1&gt;.jpg: album association: unavailable" in reply
+    assert "关联相册" in format_summary_reply(summary, lang_code="zh")
+
+
+def test_large_summary_is_split_into_valid_telegram_messages() -> None:
+    from immich_tg_bot.bot import format_summary_replies
+    from immich_tg_bot.pipeline import IngestSummary
+
+    errors = [f"photo-{i}.jpg: album association: unavailable" for i in range(300)]
+    replies = format_summary_replies(IngestSummary(uploaded=300, errors=300, error_messages=errors))
+    assert len(replies) > 1
+    assert all(len(reply) <= 4000 for reply in replies)
+    assert "Uploaded: 300" in replies[0]
+    assert all(error in "\n".join(replies) for error in errors)
 
 
 @pytest.mark.parametrize(
