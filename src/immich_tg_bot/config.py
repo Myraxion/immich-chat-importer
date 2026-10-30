@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from .i18n import SUPPORTED_LANGUAGES
@@ -16,12 +16,17 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
-    bot_token: str
-    telegram_api_id: int
-    telegram_api_hash: str
+    bot_token: str = ""
+    telegram_api_id: int | None = None
+    telegram_api_hash: str = ""
     immich_url: str
     immich_api_key: str
     allowed_user_ids: Annotated[list[int], NoDecode] = Field(default_factory=list)
+    enabled_platforms: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["telegram"])
+    discord_token: str = ""
+    discord_allowed_user_ids: Annotated[list[int], NoDecode] = Field(default_factory=list)
+    discord_album_name: str = "Discord Inbox"
+    discord_max_attachment_mb: int = Field(default=2000, gt=0)
 
     album_name: str | None = None
     album_name_template: str = ""
@@ -39,7 +44,7 @@ class Settings(BaseSettings):
     tg_api_base: str = "http://telegram-bot-api:8081"
     cleanup_local_files: bool = True
 
-    @field_validator("allowed_user_ids", mode="before")
+    @field_validator("allowed_user_ids", "discord_allowed_user_ids", mode="before")
     @classmethod
     def _parse_user_ids(cls, v: object) -> list[int]:
         if isinstance(v, str):
@@ -52,6 +57,28 @@ class Settings(BaseSettings):
         if not isinstance(v, list):
             raise ValueError("allowed_user_ids must be a comma-separated list or JSON array")
         return [int(x) for x in v if str(x).strip()]
+
+    @field_validator("enabled_platforms", mode="before")
+    @classmethod
+    def _parse_platforms(cls, v: object) -> object:
+        return [part.strip().lower() for part in v.split(",")] if isinstance(v, str) else v
+
+    @field_validator("telegram_api_id", mode="before")
+    @classmethod
+    def _empty_telegram_api_id(cls, v: object) -> object:
+        return None if v == "" else v
+
+    @model_validator(mode="after")
+    def _validate_platform_credentials(self) -> "Settings":
+        if not self.enabled_platforms or set(self.enabled_platforms) - {"telegram", "discord"}:
+            raise ValueError("enabled_platforms must contain telegram and/or discord")
+        if "telegram" in self.enabled_platforms and not (
+            self.bot_token and self.telegram_api_id and self.telegram_api_hash
+        ):
+            raise ValueError("Telegram credentials are required when Telegram is enabled")
+        if "discord" in self.enabled_platforms and not self.discord_token:
+            raise ValueError("Discord token is required when Discord is enabled")
+        return self
 
     @field_validator("immich_url")
     @classmethod

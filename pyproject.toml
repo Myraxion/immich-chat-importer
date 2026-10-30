@@ -23,6 +23,7 @@ dependencies = [
     "pydantic-settings>=2.7",
     "Pillow>=10.2",
     "tzdata",
+    "discord-py>=2.4,<3",
 ]
 
 

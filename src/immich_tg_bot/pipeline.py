@@ -89,8 +89,13 @@ class IngestionPipeline:
         self._max_archive_files = max_archive_files
         self._device_id = device_id
         self._cleanup_local = cleanup_local
+        self._ingest_lock = asyncio.Lock()
 
     async def ingest(self, items: Sequence[IngestItem]) -> IngestSummary:
+        async with self._ingest_lock:
+            return await self._ingest(items)
+
+    async def _ingest(self, items: Sequence[IngestItem]) -> IngestSummary:
         summary = IngestSummary()
         if not items:
             return summary

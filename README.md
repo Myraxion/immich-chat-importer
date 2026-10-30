@@ -202,3 +202,18 @@ Releases are cut by pushing a `vX.Y.Z` tag — that triggers a multi-arch build 
 ## License
 
 [AGPL-3.0-only](LICENSE) — same family as Immich itself. If you run a modified version as a network service, you must offer your changes back under the same license.
+# Discord DM import
+
+To run Discord alone, install the project and set `ENABLED_PLATFORMS=discord`,
+`DISCORD_TOKEN`, `DISCORD_ALLOWED_USER_IDS`, `IMMICH_URL` and `IMMICH_API_KEY`.
+Set `DISCORD_ALBUM_NAME` to change the default `Discord Inbox` album and
+`DISCORD_MAX_ATTACHMENT_MB` to change the per-file limit (default 2000 MiB).
+The existing `DEFAULT_LANGUAGE`, `DATA_DIR`, and `CLEANUP_LOCAL_FILES` settings apply.
+Telegram credentials and the local Telegram Bot API server are unnecessary in this mode.
+
+Create a Discord bot, install it to an account or server where you can DM it, and
+run `immich-telegram-bot`. Send a photo and a video as attachments in a direct
+message from a whitelisted account. The reply reports the outcome; check the
+Discord Inbox album in Immich for the imported media. Message-menu imports,
+archives, status queries and combined container deployment are subsequent work.
+

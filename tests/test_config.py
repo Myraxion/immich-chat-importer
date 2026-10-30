@@ -96,3 +96,25 @@ def test_cleanup_local_files_setting(
     monkeypatch.setenv("CLEANUP_LOCAL_FILES", "false")
     settings_custom = Settings(_env_file=None)
     assert settings_custom.cleanup_local_files is False
+
+
+def test_discord_only_requires_no_telegram_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ENABLED_PLATFORMS", "discord")
+    monkeypatch.setenv("DISCORD_TOKEN", "token")
+    monkeypatch.setenv("DISCORD_ALLOWED_USER_IDS", "12,34")
+    monkeypatch.setenv("TELEGRAM_API_ID", "")
+    monkeypatch.setenv("IMMICH_URL", "https://immich.example/api")
+    monkeypatch.setenv("IMMICH_API_KEY", "key")
+    settings = Settings(_env_file=None)
+    assert settings.discord_allowed_user_ids == [12, 34]
+    assert settings.telegram_api_id is None
+    assert settings.discord_album_name == "Discord Inbox"
+    assert settings.discord_max_attachment_mb == 2000
+
+
+def test_discord_requires_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ENABLED_PLATFORMS", "discord")
+    monkeypatch.setenv("IMMICH_URL", "https://immich.example/api")
+    monkeypatch.setenv("IMMICH_API_KEY", "key")
+    with pytest.raises(ValueError, match="Discord token"):
+        Settings(_env_file=None)

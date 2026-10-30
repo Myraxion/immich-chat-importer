@@ -3,6 +3,20 @@ from typing import Any
 SUPPORTED_LANGUAGES: tuple[str, ...] = ("en", "zh", "ja", "ru")
 
 _MESSAGES: dict[str, dict[str, str]] = {
+    "discord_counts": {
+        "en": (
+            "Uploaded: {uploaded}, duplicates: {duplicates}, skipped: {skipped}, errors: {errors}"
+        ),
+        "zh": "已上传：{uploaded}，重复项：{duplicates}，跳过：{skipped}，失败：{errors}",
+        "ja": "アップロード: {uploaded}、重複: {duplicates}、スキップ: {skipped}、エラー: {errors}",
+        "ru": (
+            "Загружено: {uploaded}, дубликатов: {duplicates}, "
+            "пропущено: {skipped}, ошибок: {errors}"
+        ),
+    },
+    "discord_skipped": {
+        "en": "unsupported", "zh": "不支持", "ja": "未対応", "ru": "не поддерживается"
+    },
     "stage_upload": {"en": "upload", "zh": "上传", "ja": "アップロード", "ru": "загрузка"},
     "stage_album_lookup": {
         "en": "album lookup/create", "zh": "查找或创建相册",

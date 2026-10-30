@@ -1,3 +1,4 @@
+import asyncio
 import sqlite3
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -14,6 +15,32 @@ from immich_tg_bot.bot import _extract_ingest_item
 from immich_tg_bot.config import Settings
 from immich_tg_bot.pipeline import IngestionPipeline, IngestItem
 from immich_tg_bot.state import State
+
+
+async def test_concurrent_batches_reuse_identical_content(
+    tmp_path: Path, state: State, fake_immich: AsyncMock
+) -> None:
+    first, second = tmp_path / "one.jpg", tmp_path / "two.jpg"
+    first.write_bytes(b"same")
+    second.write_bytes(b"same")
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def upload(**kwargs: Any) -> dict[str, str]:
+        entered.set()
+        await asyncio.wait_for(release.wait(), timeout=2)
+        return {"id": "asset", "status": "created"}
+
+    fake_immich.upload_asset.side_effect = upload
+    pipeline = IngestionPipeline(fake_immich, state)
+    now = datetime.now(UTC)
+    task1 = asyncio.create_task(pipeline.ingest([IngestItem(1, 1, first, first.name, now)]))
+    await asyncio.wait_for(entered.wait(), timeout=2)
+    task2 = asyncio.create_task(pipeline.ingest([IngestItem(1, 2, second, second.name, now)]))
+    release.set()
+    result1, result2 = await asyncio.gather(task1, task2)
+    assert (result1.uploaded, result2.duplicates) == (1, 1)
+    assert fake_immich.upload_asset.await_count == 1
 
 
 async def test_repeat_source_routes_existing_asset_after_reopening_state(
@@ -79,7 +106,8 @@ async def test_partial_album_failure_retries_only_failed_asset(
     first.write_bytes(b"a")
     second.write_bytes(b"b")
     fake_immich.upload_asset.side_effect = [
-        {"id": "asset-a", "status": "created"}, {"id": "asset-b", "status": "created"}
+        {"id": "asset-a", "status": "created"},
+        {"id": "asset-b", "status": "created"},
     ]
     fake_immich.add_to_album.side_effect = [{"asset-b": "forbidden"}, {}]
     items = [
@@ -103,7 +131,8 @@ async def test_cached_and_remote_duplicate_assets_are_routed(
 ) -> None:
     fake_immich.get_or_create_album.side_effect = lambda name: name
     fake_immich.upload_asset.side_effect = [
-        {"id": "remote", "status": "duplicate"}, {"id": "other", "status": "created"}
+        {"id": "remote", "status": "duplicate"},
+        {"id": "other", "status": "created"},
     ]
     items = []
     for number, content in enumerate([b"same", b"same", b"different"]):
@@ -128,7 +157,8 @@ async def test_archive_assets_survive_album_lookup_failure_and_reopen(
     archive = tmp_path / "bundle.zip"
     archive.write_bytes(b"archive")
     fake_immich.upload_asset.side_effect = [
-        {"id": "asset-a", "status": "created"}, {"id": "asset-b", "status": "created"}
+        {"id": "asset-a", "status": "created"},
+        {"id": "asset-b", "status": "created"},
     ]
     fake_immich.get_or_create_album.side_effect = RuntimeError("offline")
     db = tmp_path / "state.sqlite"
