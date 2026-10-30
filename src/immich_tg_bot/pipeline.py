@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import tempfile
 from collections import defaultdict
@@ -24,13 +25,15 @@ _EXIF_DATETIME = 306
 
 @dataclass(frozen=True)
 class IngestItem:
-    chat_id: int
-    message_id: int
+    chat_id: int | str
+    message_id: int | str
     local_path: Path
     file_name: str
     created_at: datetime
     target_album: str | None = None
     original_file_name: str | None = None
+    platform: str = "telegram"
+    attachment_id: str = ""
 
 
 @dataclass
@@ -126,7 +129,11 @@ class IngestionPipeline:
         album_groups: dict[str, list[str]],
     ) -> None:
         # 1. 消息级去重
-        if await self._state.already_processed(item.chat_id, item.message_id):
+        legacy = item.platform == "telegram" and not item.attachment_id
+        identity = (item.platform, str(item.chat_id), str(item.message_id), item.attachment_id)
+        if (legacy and await self._state.already_processed(item.chat_id, item.message_id)) or (
+            not legacy and await self._state.item_processed(*identity)
+        ):
             summary.duplicates += 1
             self._maybe_cleanup(item.local_path)
             return
@@ -135,7 +142,11 @@ class IngestionPipeline:
         item_errors: list[str] = []
         item_new_ids: list[str] = []
 
-        prefix = f"telegram:{item.chat_id}:{item.message_id}"
+        prefix = (
+            f"telegram:{item.chat_id}:{item.message_id}"
+            if legacy
+            else json.dumps(identity, ensure_ascii=True, separators=(",", ":"))
+        )
 
         if is_archive(item.original_file_name or item.file_name):
             with tempfile.TemporaryDirectory(prefix="tg-archive-") as tmpdir:
@@ -153,16 +164,22 @@ class IngestionPipeline:
                 media = walk_media(tmp, self._max_archive_files)
                 if not media:
                     log.info("Archive %s contained no recognised media", item.local_path)
-                    await self._state.mark_processed(item.chat_id, item.message_id, 0, "done", None)
+                    if legacy:
+                        await self._state.mark_processed(
+                            item.chat_id, item.message_id, 0, "done", None
+                        )
+                    else:
+                        await self._state.mark_item_processed(*identity)
                     self._maybe_cleanup(item.local_path)
                     return
 
-                for i, m in enumerate(media):
+                for m in media:
                     await self._dispatch_upload(
                         file_path=m,
                         file_name=m.name,
                         target_album=item.target_album,
-                        device_asset_id=f"{prefix}:{i}:{m.name}",
+                        device_asset_id=prefix,
+                        archive_member=True,
                         created_at=item.created_at,
                         summary=summary,
                         item_new_ids=item_new_ids,
@@ -184,7 +201,10 @@ class IngestionPipeline:
 
         # 3. 严格成功标记：若无错误，标记消息已完成
         if not item_errors:
-            await self._state.mark_processed(item.chat_id, item.message_id, 0, "done", None)
+            if legacy:
+                await self._state.mark_processed(item.chat_id, item.message_id, 0, "done", None)
+            else:
+                await self._state.mark_item_processed(*identity)
             self._maybe_cleanup(item.local_path)
 
     async def _dispatch_upload(
@@ -199,6 +219,7 @@ class IngestionPipeline:
         item_new_ids: list[str],
         item_errors: list[str],
         album_groups: dict[str, list[str]],
+        archive_member: bool = False,
     ) -> None:
         try:
             status, asset_id = await self._upload_one(
@@ -206,6 +227,7 @@ class IngestionPipeline:
                 file_name=file_name,
                 device_asset_id=device_asset_id,
                 fallback_created_at=created_at,
+                archive_member=archive_member,
             )
             if status == "created":
                 summary.uploaded += 1
@@ -230,8 +252,11 @@ class IngestionPipeline:
         file_name: str,
         device_asset_id: str,
         fallback_created_at: datetime,
+        archive_member: bool = False,
     ) -> tuple[str, str]:
         checksum = await asyncio.to_thread(sha1_file, file_path)
+        if archive_member:
+            device_asset_id = f"{device_asset_id}:{checksum}"
         cached = await self._state.asset_for_sha1(checksum)
         if cached:
             return "cached", cached

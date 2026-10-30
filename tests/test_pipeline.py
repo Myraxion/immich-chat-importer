@@ -1,3 +1,4 @@
+import sqlite3
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -13,6 +14,132 @@ from immich_tg_bot.bot import _extract_ingest_item
 from immich_tg_bot.config import Settings
 from immich_tg_bot.pipeline import IngestionPipeline, IngestItem
 from immich_tg_bot.state import State
+
+
+async def test_multiple_attachments_in_one_message_are_independent(
+    tmp_path: Path, state: State, fake_immich: AsyncMock
+) -> None:
+    first = tmp_path / "first.jpg"
+    second = tmp_path / "second.jpg"
+    first.write_bytes(b"first")
+    second.write_bytes(b"second")
+    pipeline = IngestionPipeline(fake_immich, state)
+    items = [
+        IngestItem(
+            1, 2, first, "first.jpg", datetime.now(UTC), platform="discord", attachment_id="a"
+        ),
+        IngestItem(
+            1, 2, second, "second.jpg", datetime.now(UTC), platform="discord", attachment_id="b"
+        ),
+    ]
+
+    summary = await pipeline.ingest(items)
+
+    assert summary.uploaded == 2
+    assert fake_immich.upload_asset.await_count == 2
+
+
+async def test_source_identity_isolated_across_platforms_and_channels(
+    tmp_path: Path, state: State, fake_immich: AsyncMock
+) -> None:
+    pipeline = IngestionPipeline(fake_immich, state, cleanup_local=False)
+    items = []
+    for i, (platform, channel) in enumerate(
+        [("discord", "1"), ("telegram", "1"), ("discord", "2")]
+    ):
+        path = tmp_path / f"{i}.jpg"
+        path.write_bytes(str(i).encode())
+        items.append(
+            IngestItem(
+                channel,
+                "3",
+                path,
+                path.name,
+                datetime.now(UTC),
+                platform=platform,
+                attachment_id="a",
+            )
+        )
+    assert (await pipeline.ingest(items)).uploaded == 3
+    assert (await pipeline.ingest(items)).duplicates == 3
+    assert (
+        len({call.kwargs["device_asset_id"] for call in fake_immich.upload_asset.await_args_list})
+        == 3
+    )
+
+
+async def test_reopened_legacy_state_preserves_completion_and_content_cache(
+    tmp_path: Path, fake_immich: AsyncMock
+) -> None:
+    import hashlib
+
+    db = tmp_path / "old.sqlite"
+    with sqlite3.connect(db) as conn:
+        conn.executescript("""
+            CREATE TABLE processed_messages (chat_id INTEGER, message_id INTEGER,
+                file_index INTEGER, status TEXT, asset_id TEXT, processed_at INTEGER,
+                PRIMARY KEY (chat_id, message_id, file_index));
+            CREATE TABLE sha1_cache (sha1 TEXT PRIMARY KEY, asset_id TEXT, cached_at INTEGER);
+            INSERT INTO processed_messages VALUES (10, 20, 0, 'done', NULL, 0);
+        """)
+        conn.execute(
+            "INSERT INTO sha1_cache VALUES (?, 'old-asset', 0)",
+            (hashlib.sha1(b"cached").hexdigest(),),
+        )
+    state = State(db)
+    await state.open()
+    try:
+        paths = [tmp_path / "done.jpg", tmp_path / "cached.jpg"]
+        paths[0].write_bytes(b"done")
+        paths[1].write_bytes(b"cached")
+        summary = await IngestionPipeline(fake_immich, state).ingest(
+            [
+                IngestItem(10, 20, paths[0], "done.jpg", datetime.now(UTC)),
+                IngestItem(10, 21, paths[1], "cached.jpg", datetime.now(UTC)),
+            ]
+        )
+        assert summary.duplicates == 2
+        fake_immich.upload_asset.assert_not_awaited()
+    finally:
+        await state.close()
+
+
+async def test_archive_member_identity_survives_reordering_and_renaming(
+    tmp_path: Path, state: State, fake_immich: AsyncMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive = tmp_path / "bundle.zip"
+    archive.write_bytes(b"archive")
+    reverse = False
+
+    async def extract_files(source: Path, dest: Path) -> None:
+        entries = [("a/photo.jpg", b"one"), ("b/photo.jpg", b"two")]
+        if reverse:
+            entries = [("renamed/two.jpg", b"two"), ("renamed/one.jpg", b"one")]
+        for name, content in entries:
+            path = dest / name
+            path.parent.mkdir(exist_ok=True)
+            path.write_bytes(content)
+
+    monkeypatch.setattr("immich_tg_bot.pipeline.extract", extract_files)
+    identities: dict[bytes, str] = {}
+
+    async def fail_upload(**kwargs: Any) -> None:
+        identities[kwargs["file_path"].read_bytes()] = kwargs["device_asset_id"]
+        raise RuntimeError("retry")
+
+    fake_immich.upload_asset.side_effect = fail_upload
+    pipeline = IngestionPipeline(fake_immich, state)
+    item = IngestItem(
+        1, 2, archive, "bundle.zip", datetime.now(UTC), platform="discord", attachment_id="bundle"
+    )
+    await pipeline.ingest([item])
+    first = identities.copy()
+    identities.clear()
+    reverse = True
+    await pipeline.ingest([item])
+    second = identities.copy()
+    assert len(first) == 2
+    assert first == second
 
 
 @pytest.fixture

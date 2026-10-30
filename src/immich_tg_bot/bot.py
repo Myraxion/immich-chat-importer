@@ -17,16 +17,15 @@ from aiogram.types import Message, TelegramObject
 
 from .config import Settings
 from .i18n import resolve_language, t
-from .immich import ImmichClient
 from .naming import (
     disambiguate_filenames,
-    extract_metadata,
     resolve_album_name,
     resolve_filename,
     split_filename,
 )
 from .pipeline import IngestionPipeline, IngestItem, IngestSummary, _exif_datetime
-from .state import State
+from .runtime import ingestion_runtime
+from .telegram_metadata import extract_metadata
 
 log = logging.getLogger(__name__)
 
@@ -239,7 +238,12 @@ def format_summary_reply(
     return t("status_no_media", lang_code=target_lang)
 
 
-async def run_bot(settings: Settings) -> None:
+async def run_bot(settings: Settings, pipeline: IngestionPipeline | None = None) -> None:
+    if pipeline is None:
+        async with ingestion_runtime(settings) as shared_pipeline:
+            await run_bot(settings, shared_pipeline)
+        return
+
     session = AiohttpSession(
         api=TelegramAPIServer.from_base(settings.tg_api_base, is_local=True),
     )
@@ -248,33 +252,6 @@ async def run_bot(settings: Settings) -> None:
         session=session,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
-
-    state = State(settings.data_dir / "state.sqlite")
-    await state.open()
-
-    immich = ImmichClient(base_url=settings.immich_url, api_key=settings.immich_api_key)
-
-    album_id: str | None = None
-    if settings.album_name:
-        try:
-            album_id = await immich.get_or_create_album(settings.album_name)
-            log.info("Using Immich album %r (id=%s)", settings.album_name, album_id)
-        except Exception as e:
-            log.warning(
-                "Could not resolve album %r (%s) — uploads will go to library only",
-                settings.album_name,
-                e,
-            )
-
-    pipeline = IngestionPipeline(
-        immich=immich,
-        state=state,
-        album_id=album_id,
-        default_album_name=settings.album_name,
-        max_archive_files=settings.max_archive_files,
-        cleanup_local=settings.cleanup_local_files,
-    )
-
     dp = Dispatcher()
     dp.message.middleware(WhitelistMiddleware(set(settings.allowed_user_ids)))
 
@@ -385,6 +362,4 @@ async def run_bot(settings: Settings) -> None:
         # Drain any pending media-group flushes
         for task in list(group_tasks.values()):
             task.cancel()
-        await immich.aclose()
-        await state.close()
         await bot.session.close()

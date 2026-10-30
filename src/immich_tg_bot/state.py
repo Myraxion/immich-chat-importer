@@ -18,6 +18,14 @@ CREATE TABLE IF NOT EXISTS sha1_cache (
     asset_id  TEXT NOT NULL,
     cached_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
+
+CREATE TABLE IF NOT EXISTS processed_items (
+    platform TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    message_id TEXT NOT NULL,
+    attachment_id TEXT NOT NULL,
+    PRIMARY KEY (platform, source_id, message_id, attachment_id)
+);
 """
 
 
@@ -43,7 +51,9 @@ class State:
             raise RuntimeError("State.open() was not called")
         return self._db
 
-    async def already_processed(self, chat_id: int, message_id: int, file_index: int = 0) -> bool:
+    async def already_processed(
+        self, chat_id: int | str, message_id: int | str, file_index: int = 0
+    ) -> bool:
         cur = await self.db.execute(
             "SELECT 1 FROM processed_messages WHERE chat_id=? AND message_id=? AND file_index=?",
             (chat_id, message_id, file_index),
@@ -52,8 +62,8 @@ class State:
 
     async def mark_processed(
         self,
-        chat_id: int,
-        message_id: int,
+        chat_id: int | str,
+        message_id: int | str,
         file_index: int,
         status: str,
         asset_id: str | None,
@@ -69,6 +79,25 @@ class State:
         cur = await self.db.execute("SELECT asset_id FROM sha1_cache WHERE sha1=?", (sha1,))
         row = await cur.fetchone()
         return row[0] if row else None
+
+    async def item_processed(
+        self, platform: str, source_id: str, message_id: str, attachment_id: str
+    ) -> bool:
+        cur = await self.db.execute(
+            "SELECT 1 FROM processed_items WHERE platform=? AND source_id=? "
+            "AND message_id=? AND attachment_id=?",
+            (platform, source_id, message_id, attachment_id),
+        )
+        return await cur.fetchone() is not None
+
+    async def mark_item_processed(
+        self, platform: str, source_id: str, message_id: str, attachment_id: str
+    ) -> None:
+        await self.db.execute(
+            "INSERT OR IGNORE INTO processed_items VALUES (?,?,?,?)",
+            (platform, source_id, message_id, attachment_id),
+        )
+        await self.db.commit()
 
     async def cache_sha1(self, sha1: str, asset_id: str) -> None:
         await self.db.execute(
