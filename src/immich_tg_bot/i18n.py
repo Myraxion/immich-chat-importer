@@ -3,6 +3,25 @@ from typing import Any
 SUPPORTED_LANGUAGES: tuple[str, ...] = ("en", "zh", "ja", "ru")
 
 _MESSAGES: dict[str, dict[str, str]] = {
+    "discord_too_large": {
+        "en": "exceeds {limit} MiB",
+        "zh": "超过 {limit} MiB",
+        "ja": "{limit} MiB を超過",
+        "ru": "превышает {limit} МиБ",
+    },
+    "discord_download": {"en": "download", "zh": "下载", "ja": "ダウンロード", "ru": "скачивание"},
+    "discord_network_error": {
+        "en": "network error",
+        "zh": "网络错误",
+        "ja": "ネットワークエラー",
+        "ru": "ошибка сети",
+    },
+    "discord_unauthorized": {
+        "en": "You are not authorized to import media.",
+        "zh": "你无权导入媒体。",
+        "ja": "インポートする権限がありません。",
+        "ru": "У вас нет доступа к импорту.",
+    },
     "discord_counts": {
         "en": (
             "Uploaded: {uploaded}, duplicates: {duplicates}, skipped: {skipped}, errors: {errors}"
@@ -15,16 +34,23 @@ _MESSAGES: dict[str, dict[str, str]] = {
         ),
     },
     "discord_skipped": {
-        "en": "unsupported", "zh": "不支持", "ja": "未対応", "ru": "не поддерживается"
+        "en": "unsupported",
+        "zh": "不支持",
+        "ja": "未対応",
+        "ru": "не поддерживается",
     },
     "stage_upload": {"en": "upload", "zh": "上传", "ja": "アップロード", "ru": "загрузка"},
     "stage_album_lookup": {
-        "en": "album lookup/create", "zh": "查找或创建相册",
-        "ja": "アルバムの検索・作成", "ru": "поиск или создание альбома",
+        "en": "album lookup/create",
+        "zh": "查找或创建相册",
+        "ja": "アルバムの検索・作成",
+        "ru": "поиск или создание альбома",
     },
     "stage_album_association": {
-        "en": "album association", "zh": "关联相册",
-        "ja": "アルバムへの追加", "ru": "добавление в альбом",
+        "en": "album association",
+        "zh": "关联相册",
+        "ja": "アルバムへの追加",
+        "ru": "добавление в альбом",
     },
     "start": {
         "en": (

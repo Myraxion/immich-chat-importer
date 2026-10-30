@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import httpx
+import pytest
 
 from immich_tg_bot.config import Settings
 from immich_tg_bot.discord_bot import handle_dm
@@ -153,3 +154,93 @@ async def test_limits_and_failed_download_do_not_stop_other_attachments(tmp_path
     assert "Uploaded: 1, duplicates: 0, skipped: 0, errors: 3" in replies[0]
     assert "secret" not in replies[0]
     assert list((tmp_path / "discord-downloads").iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "guild_id, guild_name, channel_name, source",
+    [
+        (8, None, "photos", "8_photos"),
+        (8, "Guild", None, "Guild_20"),
+        (None, None, None, "Alice"),  # bot DM, another DM, and group DM share this payload
+    ],
+)
+async def test_menu_private_response_uses_original_author_and_context(
+    tmp_path, guild_id, guild_name, channel_name, source
+):
+    from immich_tg_bot.discord_bot import handle_menu
+    from immich_tg_bot.pipeline import IngestSummary
+
+    events = []
+
+    class Pipeline:
+        async def ingest(self, items):
+            events.append((items[0].file_name, items[0].target_album, items[0].chat_id))
+            return IngestSummary(uploaded=1)
+
+    class Response:
+        async def defer(self, **kwargs):
+            events.append(kwargs)
+
+    async def edit_original_response(**kwargs):
+        events.append(kwargs)
+
+    interaction = SimpleNamespace(
+        user=SimpleNamespace(id=42),
+        locale="zh-CN",
+        response=Response(),
+        edit_original_response=edit_original_response,
+        guild=SimpleNamespace(id=8, name=guild_name) if guild_id else None,
+        guild_id=guild_id,
+        channel=SimpleNamespace(id=20, name=channel_name),
+    )
+    message = SimpleNamespace(
+        id=10,
+        channel=SimpleNamespace(id=20),
+        author=SimpleNamespace(id=99, display_name="Alice", name="alice"),
+        created_at=datetime(2024, 1, 2, tzinfo=UTC),
+        content="",
+        attachments=[SimpleNamespace(id=1, filename="a.jpg", size=1, url="https://cdn.test/a")],
+    )
+    settings = Settings.model_construct(
+        data_dir=tmp_path,
+        discord_allowed_user_ids=[42],
+        discord_filename_template="{source}_{sender}_{message_id}",
+        discord_album_name_template="{source}",
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda req: httpx.Response(200, content=b"a"))
+    ) as client:
+        await handle_menu(interaction, message, settings, Pipeline(), client)
+    assert events[0] == {"ephemeral": True, "thinking": True}
+    assert events[1] == (f"{source}_Alice_10.jpg", source, 20)
+    assert "已上传：1" in events[2]["content"]
+
+
+async def test_menu_denies_caller_even_when_author_is_allowed(tmp_path):
+    from immich_tg_bot.discord_bot import handle_menu
+
+    events = []
+
+    class Response:
+        async def defer(self, **kwargs):
+            events.append(kwargs)
+
+    async def edit_original_response(**kwargs):
+        events.append(kwargs["content"])
+
+    interaction = SimpleNamespace(
+        user=SimpleNamespace(id=99),
+        locale="en-US",
+        response=Response(),
+        edit_original_response=edit_original_response,
+    )
+    message = SimpleNamespace(author=SimpleNamespace(id=42))
+    settings = Settings.model_construct(data_dir=tmp_path, discord_allowed_user_ids=[42])
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda req: events.append(req))
+    ) as client:
+        await handle_menu(interaction, message, settings, None, client)
+    assert events == [
+        {"ephemeral": True, "thinking": True},
+        "You are not authorized to import media.",
+    ]

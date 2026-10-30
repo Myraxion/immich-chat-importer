@@ -214,6 +214,34 @@ Telegram credentials and the local Telegram Bot API server are unnecessary in th
 Create a Discord bot, install it to an account or server where you can DM it, and
 run `immich-telegram-bot`. Send a photo and a video as attachments in a direct
 message from a whitelisted account. The reply reports the outcome; check the
-Discord Inbox album in Immich for the imported media. Message-menu imports,
-archives, status queries and combined container deployment are subsequent work.
+Discord Inbox album in Immich for the imported media. Archives, status queries
+and combined container deployment are subsequent work.
+
+Set `DISCORD_FILENAME_TEMPLATE` (default `{original_name}`) and
+`DISCORD_ALBUM_NAME_TEMPLATE` (default empty, falling back to `DISCORD_ALBUM_NAME`)
+to use the same naming variables and `TZ` as Telegram. For a server message,
+`{source}` is the server and channel names, each falling back to its ID. In
+private conversations it is the original author's display name or username.
+`{sender}` is always the original author. Archive entries retain their filenames.
+
+### Personal installation acceptance checklist
+
+These checks require real Discord accounts and have not yet been performed:
+
+1. In the Developer Portal enable user installation and the `applications.commands`
+   scope; install the application to a whitelisted account. Start the bot and allow
+   global commands to synchronize.
+2. In a server the bot has not joined, use Apps → Save to Immich on another
+   author's photo/video message. Confirm every supported attachment arrives, the
+   source and sender templates identify the original message, and only the caller
+   sees the result. Repeat where external apps cannot post public responses.
+3. Repeat in the bot DM, another person's DM, and a group DM. Check that the
+   private result appears only to the caller, and that saving a bot DM already
+   imported automatically does not upload a second copy.
+4. Repeat with a non-whitelisted caller, missing server/channel names, Chinese
+   locale, and configured filename/album templates. Confirm denial happens before
+   download, ID fallbacks work, and the result is localized.
+
+Results after the interaction response window and restart interruption handling
+are planned for the long-running task issue.
 

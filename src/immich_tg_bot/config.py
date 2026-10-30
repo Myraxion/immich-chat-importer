@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     discord_token: str = ""
     discord_allowed_user_ids: Annotated[list[int], NoDecode] = Field(default_factory=list)
     discord_album_name: str = "Discord Inbox"
+    discord_album_name_template: str = ""
+    discord_filename_template: str = "{original_name}"
     discord_max_attachment_mb: int = Field(default=2000, gt=0)
 
     album_name: str | None = None

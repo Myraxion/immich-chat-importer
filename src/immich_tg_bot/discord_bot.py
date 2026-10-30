@@ -1,16 +1,20 @@
 import logging
+import mimetypes
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import discord
 import httpx
+from discord import app_commands
 
 from .archives import is_media
 from .config import Settings
-from .i18n import t
-from .naming import MessageMetadata
-from .pipeline import IngestionPipeline, IngestItem, IngestSummary
+from .i18n import resolve_language, t
+from .naming import MessageMetadata, resolve_album_name, resolve_filename, split_filename
+from .pipeline import IngestionPipeline, IngestItem, IngestSummary, _exif_datetime
 from .runtime import ingestion_runtime
 
 log = logging.getLogger(__name__)
@@ -22,10 +26,13 @@ async def process_import(
     settings: Settings,
     pipeline: IngestionPipeline,
     client: httpx.AsyncClient,
+    interaction: Any = None,
 ) -> str | None:
     """Process a Discord message on behalf of an authorized operator."""
     if operator_id not in settings.discord_allowed_user_ids:
         return None
+    locale = getattr(interaction, "locale", None) if interaction else None
+    lang = resolve_language(str(locale) if locale else None, settings.default_language)
     items: list[IngestItem] = []
     errors: list[str] = []
     skipped: list[str] = []
@@ -34,13 +41,25 @@ async def process_import(
     sender = (
         getattr(author, "display_name", None) or getattr(author, "name", None) or str(author.id)
     )
+    guild_id = getattr(interaction, "guild_id", None) if interaction else None
+    guild = getattr(interaction, "guild", None) if interaction else None
+    channel = getattr(interaction, "channel", None) if interaction else None
+    source = (
+        f"{getattr(guild, 'name', None) or guild_id}_"
+        f"{getattr(channel, 'name', None) or message.channel.id}"
+        if guild_id
+        else sender
+    )
+    msg_date = message.created_at.astimezone(ZoneInfo(settings.tz))
     metadata = MessageMetadata(
-        source=sender,
+        source=source,
         source_id=str(author.id),
         source_username=getattr(author, "name", "") or str(author.id),
         message_id=str(message.id),
-        date=message.created_at,
-        msg_date=message.created_at,
+        date=msg_date,
+        msg_date=msg_date,
+        msg_id=str(message.id),
+        chat_title=source,
         sender=sender,
         sender_id=str(author.id),
         chat_id=str(message.channel.id),
@@ -48,13 +67,16 @@ async def process_import(
     )
     download_dir = settings.data_dir / "discord-downloads"
     download_dir.mkdir(parents=True, exist_ok=True)
-    for attachment in message.attachments:
+    for index, attachment in enumerate(message.attachments, 1):
         name = attachment.filename or str(attachment.id)
         if not is_media(name):
             skipped.append(name)
             continue
         if attachment.size > limit:
-            errors.append(f"{name}: exceeds {settings.discord_max_attachment_mb} MiB")
+            errors.append(
+                f"{name}: "
+                + t("discord_too_large", lang_code=lang, limit=settings.discord_max_attachment_mb)
+            )
             continue
         path = None
         try:
@@ -68,8 +90,26 @@ async def process_import(
                     async for chunk in response.aiter_bytes():
                         size += len(chunk)
                         if size > limit:
-                            raise ValueError(f"exceeds {settings.discord_max_attachment_mb} MiB")
+                            raise ValueError(
+                                t(
+                                    "discord_too_large",
+                                    lang_code=lang,
+                                    limit=settings.discord_max_attachment_mb,
+                                )
+                            )
                         f.write(chunk)
+            stem, extension = split_filename(name)
+            exif_date = _exif_datetime(path)
+            item_metadata = replace(
+                metadata,
+                index=index,
+                media_type="video"
+                if (mimetypes.guess_type(name)[0] or "").startswith("video/")
+                else "photo",
+                original_name=stem,
+                file_unique_id=str(attachment.id),
+                exif_date=exif_date.astimezone(ZoneInfo(settings.tz)) if exif_date else None,
+            )
             items.append(
                 IngestItem(
                     chat_id=message.channel.id,
@@ -77,10 +117,19 @@ async def process_import(
                     attachment_id=str(attachment.id),
                     platform="discord",
                     local_path=path,
-                    file_name=name,
+                    file_name=resolve_filename(
+                        settings.discord_filename_template,
+                        item_metadata,
+                        extension,
+                        default_template="{original_name}",
+                    ),
                     original_file_name=name,
                     created_at=metadata.msg_date or metadata.date,
-                    target_album=settings.discord_album_name,
+                    target_album=resolve_album_name(
+                        settings.discord_album_name_template,
+                        item_metadata,
+                        fallback_album=settings.discord_album_name,
+                    ),
                 )
             )
         except Exception as exc:
@@ -89,10 +138,14 @@ async def process_import(
             reason = (
                 f"HTTP {exc.response.status_code}"
                 if isinstance(exc, httpx.HTTPStatusError)
-                else ("network error" if isinstance(exc, httpx.HTTPError) else str(exc))
+                else (
+                    t("discord_network_error", lang_code=lang)
+                    if isinstance(exc, httpx.HTTPError)
+                    else str(exc)
+                )
             )
             log.warning("Discord download failed for %s: %s", name, reason)
-            errors.append(f"{name}: download: {reason}")
+            errors.append(f"{name}: {t('discord_download', lang_code=lang)}: {reason}")
     try:
         summary = await pipeline.ingest(items) if items else IngestSummary()
     finally:
@@ -100,7 +153,6 @@ async def process_import(
             for item in items:
                 item.local_path.unlink(missing_ok=True)
     errors.extend(summary.error_messages)
-    lang = settings.default_language
     counts = t(
         "discord_counts",
         lang_code=lang,
@@ -124,6 +176,44 @@ async def handle_dm(
             )
 
 
+async def handle_menu(
+    interaction: Any,
+    message: Any,
+    settings: Settings,
+    pipeline: IngestionPipeline,
+    client: httpx.AsyncClient,
+) -> None:
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    result = await process_import(
+        message, interaction.user.id, settings, pipeline, client, interaction
+    )
+    if result is None:
+        result = t(
+            "discord_unauthorized",
+            lang_code=resolve_language(
+                str(interaction.locale) if interaction.locale else None, settings.default_language
+            ),
+        )
+    await interaction.edit_original_response(
+        content=result[:2000], allowed_mentions=discord.AllowedMentions.none()
+    )
+
+
+class CommandTranslator(app_commands.Translator):
+    async def translate(
+        self,
+        string: app_commands.locale_str,
+        locale: discord.Locale,
+        context: app_commands.TranslationContext,
+    ) -> str | None:
+        if string.message == "Save to Immich" and locale in (
+            discord.Locale.chinese,
+            discord.Locale.taiwan_chinese,
+        ):
+            return "保存到 Immich"
+        return None
+
+
 async def run_discord(settings: Settings, pipeline: IngestionPipeline | None = None) -> None:
     if pipeline is None:
         async with ingestion_runtime(settings) as shared_pipeline:
@@ -132,9 +222,23 @@ async def run_discord(settings: Settings, pipeline: IngestionPipeline | None = N
     intents = discord.Intents.none()
     intents.dm_messages = True
     bot = discord.Client(intents=intents)
+    tree = app_commands.CommandTree(bot)
     async with httpx.AsyncClient(
         timeout=httpx.Timeout(600, connect=30), follow_redirects=True
     ) as client:
+
+        @app_commands.allowed_installs(guilds=True, users=True)
+        @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+        @tree.context_menu(name="Save to Immich")
+        async def save_to_immich(
+            interaction: discord.Interaction, message: discord.Message
+        ) -> None:
+            await handle_menu(interaction, message, settings, pipeline, client)
+
+        @bot.event
+        async def on_ready() -> None:
+            await tree.set_translator(CommandTranslator())
+            await tree.sync()
 
         @bot.event
         async def on_message(message: discord.Message) -> None:
