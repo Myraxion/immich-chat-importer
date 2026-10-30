@@ -95,26 +95,43 @@ class IngestionPipeline:
         if not items:
             return summary
 
-        album_groups: dict[str, list[str]] = defaultdict(list)
+        album_groups: dict[str, dict[str, str]] = defaultdict(dict)
         for item in items:
             await self._ingest_item(item, summary, album_groups)
 
-        for album_key, asset_ids in album_groups.items():
-            if not asset_ids:
+        for album_key, assets in album_groups.items():
+            pending = {
+                asset_id: name for asset_id, name in assets.items()
+                if not await self._state.album_completed(asset_id, album_key)
+            }
+            if not pending:
                 continue
+            stage = "album lookup/create"
             try:
                 if self._album_id and album_key == self._album_id:
                     target_id = self._album_id
                 else:
                     target_id = await self._immich.get_or_create_album(album_key)
-                await self._immich.add_to_album(target_id, asset_ids)
+                stage = "album association"
+                failures = await self._immich.add_to_album(target_id, list(pending)) or {}
+                for asset_id, name in pending.items():
+                    if asset_id in failures:
+                        summary.errors += 1
+                        summary.error_messages.append(
+                            f"{name} ({asset_id}): {stage} {album_key}: {failures[asset_id]}"
+                        )
+                    else:
+                        await self._state.mark_album_completed(asset_id, album_key)
             except Exception as e:
                 log.warning(
                     "Failed to add %d asset(s) to album %r: %s",
-                    len(asset_ids),
+                    len(pending),
                     album_key,
                     e,
                 )
+                for asset_id, name in pending.items():
+                    summary.errors += 1
+                    summary.error_messages.append(f"{name} ({asset_id}): {stage} {album_key}: {e}")
 
         return summary
 
@@ -126,17 +143,23 @@ class IngestionPipeline:
         self,
         item: IngestItem,
         summary: IngestSummary,
-        album_groups: dict[str, list[str]],
+        album_groups: dict[str, dict[str, str]],
     ) -> None:
         # 1. 消息级去重
         legacy = item.platform == "telegram" and not item.attachment_id
         identity = (item.platform, str(item.chat_id), str(item.message_id), item.attachment_id)
-        if (legacy and await self._state.already_processed(item.chat_id, item.message_id)) or (
-            not legacy and await self._state.item_processed(*identity)
-        ):
-            summary.duplicates += 1
-            self._maybe_cleanup(item.local_path)
-            return
+        processed = (
+            legacy and await self._state.already_processed(item.chat_id, item.message_id)
+        ) or (not legacy and await self._state.item_processed(*identity))
+        album = item.target_album or self._default_album_name or self._album_id
+        if processed:
+            assets = await self._state.source_assets(identity)
+            if assets or not album:
+                summary.duplicates += max(1, len(assets))
+                if album:
+                    album_groups[album].update(assets)
+                self._maybe_cleanup(item.local_path)
+                return
 
         # 2. 单文件 vs 归档展开
         item_errors: list[str] = []
@@ -185,6 +208,7 @@ class IngestionPipeline:
                         item_new_ids=item_new_ids,
                         item_errors=item_errors,
                         album_groups=album_groups,
+                        identity=identity,
                     )
         else:
             await self._dispatch_upload(
@@ -197,6 +221,7 @@ class IngestionPipeline:
                 item_new_ids=item_new_ids,
                 item_errors=item_errors,
                 album_groups=album_groups,
+                identity=identity,
             )
 
         # 3. 严格成功标记：若无错误，标记消息已完成
@@ -218,7 +243,8 @@ class IngestionPipeline:
         summary: IngestSummary,
         item_new_ids: list[str],
         item_errors: list[str],
-        album_groups: dict[str, list[str]],
+        album_groups: dict[str, dict[str, str]],
+        identity: tuple[str, str, str, str],
         archive_member: bool = False,
     ) -> None:
         try:
@@ -233,14 +259,15 @@ class IngestionPipeline:
                 summary.uploaded += 1
                 summary.new_asset_ids.append(asset_id)
                 item_new_ids.append(asset_id)
-                effective_album = target_album or self._default_album_name or self._album_id
-                if effective_album:
-                    album_groups[effective_album].append(asset_id)
             elif status in ("duplicate", "cached"):
                 summary.duplicates += 1
+            await self._state.save_source_asset(identity, asset_id, file_name)
+            effective_album = target_album or self._default_album_name or self._album_id
+            if effective_album:
+                album_groups[effective_album][asset_id] = file_name
         except Exception as e:
             log.exception("Upload failed for %s", file_path)
-            err = str(e)
+            err = f"{file_name}: upload: {e}"
             summary.errors += 1
             summary.error_messages.append(err)
             item_errors.append(err)

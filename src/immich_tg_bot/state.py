@@ -26,6 +26,15 @@ CREATE TABLE IF NOT EXISTS processed_items (
     attachment_id TEXT NOT NULL,
     PRIMARY KEY (platform, source_id, message_id, attachment_id)
 );
+CREATE TABLE IF NOT EXISTS source_assets (
+    platform TEXT NOT NULL, source_id TEXT NOT NULL, message_id TEXT NOT NULL,
+    attachment_id TEXT NOT NULL, asset_id TEXT NOT NULL, file_name TEXT NOT NULL,
+    PRIMARY KEY (platform, source_id, message_id, attachment_id, asset_id)
+);
+CREATE TABLE IF NOT EXISTS asset_albums (
+    asset_id TEXT NOT NULL, album_key TEXT NOT NULL,
+    PRIMARY KEY (asset_id, album_key)
+);
 """
 
 
@@ -103,5 +112,33 @@ class State:
         await self.db.execute(
             "INSERT OR IGNORE INTO sha1_cache (sha1, asset_id) VALUES (?,?)",
             (sha1, asset_id),
+        )
+        await self.db.commit()
+
+    async def source_assets(self, identity: tuple[str, str, str, str]) -> list[tuple[str, str]]:
+        cur = await self.db.execute(
+            "SELECT asset_id, file_name FROM source_assets WHERE platform=? AND source_id=? "
+            "AND message_id=? AND attachment_id=?", identity
+        )
+        return [(row[0], row[1]) for row in await cur.fetchall()]
+
+    async def save_source_asset(
+        self, identity: tuple[str, str, str, str], asset_id: str, file_name: str
+    ) -> None:
+        await self.db.execute(
+            "INSERT OR IGNORE INTO source_assets VALUES (?,?,?,?,?,?)",
+            (*identity, asset_id, file_name),
+        )
+        await self.db.commit()
+
+    async def album_completed(self, asset_id: str, album_key: str) -> bool:
+        cur = await self.db.execute(
+            "SELECT 1 FROM asset_albums WHERE asset_id=? AND album_key=?", (asset_id, album_key)
+        )
+        return await cur.fetchone() is not None
+
+    async def mark_album_completed(self, asset_id: str, album_key: str) -> None:
+        await self.db.execute(
+            "INSERT OR IGNORE INTO asset_albums VALUES (?,?)", (asset_id, album_key)
         )
         await self.db.commit()

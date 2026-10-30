@@ -16,6 +16,144 @@ from immich_tg_bot.pipeline import IngestionPipeline, IngestItem
 from immich_tg_bot.state import State
 
 
+async def test_repeat_source_routes_existing_asset_after_reopening_state(
+    tmp_path: Path, fake_immich: AsyncMock
+) -> None:
+    path = tmp_path / "photo.jpg"
+    path.write_bytes(b"photo")
+    db = tmp_path / "state.sqlite"
+    state = State(db)
+    await state.open()
+    fake_immich.get_or_create_album.side_effect = lambda name: name
+    item = IngestItem(1, 2, path, "photo.jpg", datetime.now(UTC), target_album="first")
+    first = await IngestionPipeline(fake_immich, state, cleanup_local=False).ingest([item])
+    await state.close()
+    state = State(db)
+    await state.open()
+    try:
+        second_item = IngestItem(1, 2, path, "photo.jpg", item.created_at, target_album="second")
+        second = await IngestionPipeline(fake_immich, state).ingest([second_item])
+    finally:
+        await state.close()
+    assert first.uploaded == 1
+    assert second.duplicates == 1
+    assert second.errors == 0
+    assert fake_immich.upload_asset.await_count == 1
+    fake_immich.add_to_album.assert_any_await("first", ["asset-123"])
+    fake_immich.add_to_album.assert_any_await("second", ["asset-123"])
+
+
+async def test_album_failure_can_be_retried_after_reopening(
+    tmp_path: Path, fake_immich: AsyncMock
+) -> None:
+    path = tmp_path / "photo.jpg"
+    path.write_bytes(b"photo")
+    db = tmp_path / "state.sqlite"
+    state = State(db)
+    await state.open()
+    fake_immich.add_to_album.side_effect = RuntimeError("unavailable")
+    item = IngestItem(1, 2, path, "photo.jpg", datetime.now(UTC), target_album="trip")
+    first = await IngestionPipeline(fake_immich, state, cleanup_local=False).ingest([item])
+    assert first.uploaded == 1
+    assert first.errors == 1
+    assert "photo.jpg" in first.error_messages[0]
+    assert "album association" in first.error_messages[0]
+    await state.close()
+    fake_immich.add_to_album.side_effect = None
+    state = State(db)
+    await state.open()
+    try:
+        second = await IngestionPipeline(fake_immich, state).ingest([item])
+    finally:
+        await state.close()
+    assert second.duplicates == 1
+    assert second.errors == 0
+    assert fake_immich.upload_asset.await_count == 1
+    assert fake_immich.add_to_album.await_count == 2
+
+
+async def test_partial_album_failure_retries_only_failed_asset(
+    tmp_path: Path, state: State, fake_immich: AsyncMock
+) -> None:
+    first, second = tmp_path / "a.jpg", tmp_path / "b.jpg"
+    first.write_bytes(b"a")
+    second.write_bytes(b"b")
+    fake_immich.upload_asset.side_effect = [
+        {"id": "asset-a", "status": "created"}, {"id": "asset-b", "status": "created"}
+    ]
+    fake_immich.add_to_album.side_effect = [{"asset-b": "forbidden"}, {}]
+    items = [
+        IngestItem(1, 1, first, "a.jpg", datetime.now(UTC), target_album="trip"),
+        IngestItem(1, 2, second, "b.jpg", datetime.now(UTC), target_album="trip"),
+    ]
+    pipeline = IngestionPipeline(fake_immich, state, cleanup_local=False)
+    result = await pipeline.ingest(items)
+    assert result.uploaded == 2
+    assert result.errors == 1
+    assert "b.jpg" in result.error_messages[0]
+    retry = await pipeline.ingest(items)
+    assert retry.errors == 0
+    assert retry.duplicates == 2
+    assert fake_immich.upload_asset.await_count == 2
+    assert fake_immich.add_to_album.await_args_list[-1].args[1] == ["asset-b"]
+
+
+async def test_cached_and_remote_duplicate_assets_are_routed(
+    tmp_path: Path, state: State, fake_immich: AsyncMock
+) -> None:
+    fake_immich.get_or_create_album.side_effect = lambda name: name
+    fake_immich.upload_asset.side_effect = [
+        {"id": "remote", "status": "duplicate"}, {"id": "other", "status": "created"}
+    ]
+    items = []
+    for number, content in enumerate([b"same", b"same", b"different"]):
+        path = tmp_path / f"{number}.jpg"
+        path.write_bytes(content)
+        items.append(IngestItem(1, number, path, path.name, datetime.now(UTC), target_album="trip"))
+    result = await IngestionPipeline(fake_immich, state).ingest(items)
+    assert result.uploaded == 1
+    assert result.duplicates == 2
+    assert result.errors == 0
+    fake_immich.add_to_album.assert_awaited_once_with("trip", ["remote", "other"])
+
+
+async def test_archive_assets_survive_album_lookup_failure_and_reopen(
+    tmp_path: Path, fake_immich: AsyncMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def extract_files(source: Path, dest: Path) -> None:
+        (dest / "a.jpg").write_bytes(b"a")
+        (dest / "b.jpg").write_bytes(b"b")
+
+    monkeypatch.setattr("immich_tg_bot.pipeline.extract", extract_files)
+    archive = tmp_path / "bundle.zip"
+    archive.write_bytes(b"archive")
+    fake_immich.upload_asset.side_effect = [
+        {"id": "asset-a", "status": "created"}, {"id": "asset-b", "status": "created"}
+    ]
+    fake_immich.get_or_create_album.side_effect = RuntimeError("offline")
+    db = tmp_path / "state.sqlite"
+    state = State(db)
+    await state.open()
+    item = IngestItem(1, 2, archive, "bundle.zip", datetime.now(UTC), target_album="trip")
+    result = await IngestionPipeline(fake_immich, state, cleanup_local=False).ingest([item])
+    assert result.uploaded == 2
+    assert result.errors == 2
+    assert all("album lookup/create" in error for error in result.error_messages)
+    await state.close()
+    fake_immich.get_or_create_album.side_effect = None
+    fake_immich.get_or_create_album.return_value = "album"
+    state = State(db)
+    await state.open()
+    try:
+        retry = await IngestionPipeline(fake_immich, state).ingest([item])
+    finally:
+        await state.close()
+    assert retry.duplicates == 2
+    assert retry.errors == 0
+    assert fake_immich.upload_asset.await_count == 2
+    assert set(fake_immich.add_to_album.await_args.args[1]) == {"asset-a", "asset-b"}
+
+
 async def test_multiple_attachments_in_one_message_are_independent(
     tmp_path: Path, state: State, fake_immich: AsyncMock
 ) -> None:
@@ -389,9 +527,10 @@ async def test_ingest_album_failure_does_not_fail_upload(
 
     summary = await pipeline.ingest([item])
 
-    # 软降级：资产依然计入 uploaded，消息依然成功完成标记
+    # 上传成功与相册失败可以同时发生。
     assert summary.uploaded == 1
-    assert summary.errors == 0
+    assert summary.errors == 1
+    assert "album association" in summary.error_messages[0]
     assert await state.already_processed(1001, 2001) is True
 
 

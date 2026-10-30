@@ -124,3 +124,18 @@ async def test_get_or_create_album_uses_cache() -> None:
         assert get_calls == 1  # Cache hit on second call
     finally:
         await client.aclose()
+
+
+async def test_add_to_album_reports_individual_failures_and_accepts_duplicates() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[
+            {"id": "a", "success": True},
+            {"id": "b", "success": False, "error": "duplicate"},
+            {"id": "c", "success": False, "error": "no_permission"},
+        ])
+
+    client = await make_client(handler)
+    try:
+        assert await client.add_to_album("album", ["a", "b", "c"]) == {"c": "no_permission"}
+    finally:
+        await client.aclose()

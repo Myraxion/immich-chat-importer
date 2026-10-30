@@ -86,11 +86,16 @@ class ImmichClient:
         self._album_cache[name] = album_id
         return album_id
 
-    async def add_to_album(self, album_id: str, asset_ids: list[str]) -> None:
+    async def add_to_album(self, album_id: str, asset_ids: list[str]) -> dict[str, str]:
         if not asset_ids:
-            return
+            return {}
         r = await self._client.put(
             f"/albums/{album_id}/assets",
             json={"ids": asset_ids},
         )
         r.raise_for_status()
+        return {
+            result["id"]: result.get("error", "unknown")
+            for result in r.json()
+            if not result["success"] and result.get("error") != "duplicate"
+        }

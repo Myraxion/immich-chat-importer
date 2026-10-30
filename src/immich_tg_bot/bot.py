@@ -1,4 +1,5 @@
 import asyncio
+import html
 import logging
 import mimetypes
 from collections.abc import Awaitable, Callable
@@ -196,6 +197,18 @@ async def _extract_ingest_item(
 
 
 def format_summary_reply(
+    summary: IngestSummary,
+    resolve_errors: int = 0,
+    lang_code: str | None = None,
+    default_lang: str = "en",
+) -> str:
+    reply = _format_summary_counts(summary, resolve_errors, lang_code, default_lang)
+    if summary.error_messages:
+        reply += "\n" + "\n".join(html.escape(message) for message in summary.error_messages)
+    return reply
+
+
+def _format_summary_counts(
     summary: IngestSummary,
     resolve_errors: int = 0,
     lang_code: str | None = None,

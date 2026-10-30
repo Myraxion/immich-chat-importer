@@ -222,6 +222,18 @@ def test_format_summary_reply_languages() -> None:
     assert "Загружено: 3" in format_summary_reply(s1, lang_code=None, default_lang="ru")
 
 
+def test_summary_reply_includes_escaped_stage_and_file_context() -> None:
+    from immich_tg_bot.bot import format_summary_reply
+    from immich_tg_bot.pipeline import IngestSummary
+
+    summary = IngestSummary(
+        uploaded=1, errors=1, error_messages=["photo<1>.jpg: album association: unavailable"]
+    )
+    reply = format_summary_reply(summary, lang_code="en")
+    assert "Uploaded: 1" in reply
+    assert "photo&lt;1&gt;.jpg: album association: unavailable" in reply
+
+
 @pytest.mark.parametrize(
     ("original_name", "template", "expected"),
     [
