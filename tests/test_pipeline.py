@@ -997,3 +997,17 @@ async def test_corrupt_and_empty_archive_do_not_block_other_items(tmp_path, stat
     assert (result.uploaded, result.errors) == (1, 1)
     assert "bad.zip" in result.error_messages[0]
     assert any("empty.zip" in x and "no supported media" in x for x in result.skipped_messages)
+
+
+async def test_encrypted_archive_reports_failure(tmp_path, state, fake_immich):
+    from shutil import copyfile
+
+    archive = tmp_path / "encrypted.zip"
+    copyfile(Path(__file__).parent / "fixtures" / "encrypted.zip", archive)
+    item = IngestItem(
+        1, 2, archive, archive.name, datetime.now(UTC), platform="discord", attachment_id="1"
+    )
+    result = await asyncio.wait_for(IngestionPipeline(fake_immich, state).ingest([item]), 10)
+    assert result.errors == 1
+    assert "encrypted.zip" in result.error_messages[0]
+    fake_immich.upload_asset.assert_not_awaited()
