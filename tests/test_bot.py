@@ -8,6 +8,33 @@ from aiogram import Bot
 from immich_tg_bot.bot import _resolve_local_path
 
 
+@pytest.mark.asyncio
+async def test_telegram_status_only_shows_callers_telegram_records():
+    from immich_tg_bot.bot import handle_telegram_status
+    from immich_tg_bot.state import State
+
+    state = State()
+    record_id = await state.create_ingest_record(42, "1", "own", platform="telegram")
+    await state.finish_ingest_record(record_id, "completed", 1, 0, 0, 0, "")
+    discord_id = await state.create_ingest_record(42, "2", "discord-secret", platform="discord")
+    other_id = await state.create_ingest_record(99, "3", "other-secret", platform="telegram")
+    replies = []
+
+    async def reply(text):
+        replies.append(text)
+
+    message = SimpleNamespace(
+        chat=SimpleNamespace(type="private"),
+        from_user=SimpleNamespace(id=42, language_code="en"),
+        reply=reply,
+    )
+    await handle_telegram_status(message, state, "en")
+    assert len(replies) == 1
+    assert f"#{record_id}" in replies[0]
+    assert f"#{discord_id}" not in replies[0]
+    assert f"#{other_id}" not in replies[0]
+
+
 class FakeBot:
     def __init__(self, token: str, file_path: str | None) -> None:
         self.token = token

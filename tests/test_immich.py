@@ -6,6 +6,92 @@ import pytest
 from immich_tg_bot.immich import ImmichClient
 
 
+@pytest.mark.asyncio
+async def test_rate_limit_with_long_http_date_does_not_retry(tmp_path):
+    from datetime import UTC, datetime, timedelta
+    from email.utils import format_datetime
+
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        retry_after = format_datetime(datetime.now(UTC) + timedelta(minutes=2), usegmt=True)
+        return httpx.Response(429, headers={"Retry-After": retry_after})
+
+    file = tmp_path / "photo.jpg"
+    file.write_bytes(b"image")
+    client = await make_client(handler)
+    try:
+        now = datetime.now(UTC)
+        with pytest.raises(httpx.HTTPStatusError):
+            await client.upload_asset(
+                file_path=file,
+                device_asset_id="1",
+                device_id="1",
+                file_created_at=now,
+                file_modified_at=now,
+            )
+        assert calls == 1
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_uncertain_album_creation_is_reconciled_without_repeating_post():
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.method)
+        if request.method == "POST":
+            raise httpx.ReadTimeout("response lost", request=request)
+        albums = [] if len(calls) == 1 else [{"id": "existing", "albumName": "Photos"}]
+        return httpx.Response(200, json=albums)
+
+    client = await make_client(handler)
+    try:
+        assert await client.get_or_create_album("Photos") == "existing"
+        assert calls == ["GET", "POST", "GET"]
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_upload_retries_transient_server_error_with_same_file(tmp_path, monkeypatch):
+    from datetime import UTC, datetime
+
+    import immich_tg_bot.retry as retry
+
+    async def no_wait(seconds):
+        pass
+
+    monkeypatch.setattr(retry.asyncio, "sleep", no_wait)
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.read())
+        return httpx.Response(503) if len(calls) < 3 else httpx.Response(201, json={"id": "a"})
+
+    file = tmp_path / "photo.jpg"
+    file.write_bytes(b"image content")
+    client = await make_client(handler)
+    try:
+        now = datetime.now(UTC)
+        result = await client.upload_asset(
+            file_path=file,
+            device_asset_id="1",
+            device_id="1",
+            file_created_at=now,
+            file_modified_at=now,
+            checksum="abc",
+        )
+        assert result["id"] == "a"
+        assert len(calls) == 3
+        assert all(b"image content" in body for body in calls)
+    finally:
+        await client.aclose()
+
+
 async def make_client(handler: Callable[[httpx.Request], httpx.Response]) -> ImmichClient:
     client = ImmichClient("https://immich.example/api", "key")
     await client.aclose()
@@ -128,11 +214,14 @@ async def test_get_or_create_album_refreshes_album_list() -> None:
 
 async def test_add_to_album_reports_individual_failures_and_accepts_duplicates() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json=[
-            {"id": "a", "success": True},
-            {"id": "b", "success": False, "error": "duplicate"},
-            {"id": "c", "success": False, "error": "no_permission"},
-        ])
+        return httpx.Response(
+            200,
+            json=[
+                {"id": "a", "success": True},
+                {"id": "b", "success": False, "error": "duplicate"},
+                {"id": "c", "success": False, "error": "no_permission"},
+            ],
+        )
 
     client = await make_client(handler)
     try:

@@ -31,7 +31,7 @@ Telegram → local Bot API ─┐
 Discord → Gateway ────────┘
 ```
 
-Enabled adapters run in one process and serialize imports. Discord status queries remain responsive during an import; status history is kept in memory and cleared on restart. Imports and manual retries process each file again, and Immich reuses assets with identical contents. Discord-only deployments do not need the Telegram Bot API service or Telegram credentials.
+Enabled adapters run in one process and serialize imports. On either platform, `/status` shows the caller's five latest imports on that platform and remains responsive during an import. In Telegram, query it in a private chat with the bot. Status history is kept in memory and cleared on restart. Temporary network and selected service failures are retried up to three attempts; other failures include guidance. Imports and manual retries process each file again, and Immich reuses assets with identical contents. Discord-only deployments do not need the Telegram Bot API service or Telegram credentials.
 
 ## Choose a deployment
 

@@ -3,6 +3,78 @@ from typing import Any
 SUPPORTED_LANGUAGES: tuple[str, ...] = ("en", "zh", "ja", "ru")
 
 _MESSAGES: dict[str, dict[str, str]] = {
+    "record_waiting": {"en": "waiting", "zh": "等待中", "ja": "待機中", "ru": "ожидание"},
+    "record_processing": {"en": "processing", "zh": "处理中", "ja": "処理中", "ru": "обработка"},
+    "record_completed": {"en": "completed", "zh": "已完成", "ja": "完了", "ru": "завершено"},
+    "record_partial": {"en": "partial", "zh": "部分成功", "ja": "一部成功", "ru": "частично"},
+    "record_failed": {"en": "failed", "zh": "失败", "ja": "失敗", "ru": "ошибка"},
+    "status_attempt": {
+        "en": "{stage}: attempt {attempt}/3",
+        "zh": "{stage}：第 {attempt}/3 次尝试",
+        "ja": "{stage}: {attempt}/3 回目",
+        "ru": "{stage}: попытка {attempt}/3",
+    },
+    "status_retry_wait": {
+        "en": "{stage}: attempt {attempt}/3 in {delay}s",
+        "zh": "{stage}：{delay} 秒后进行第 {attempt}/3 次尝试",
+        "ja": "{stage}: {delay} 秒後に {attempt}/3 回目",
+        "ru": "{stage}: попытка {attempt}/3 через {delay} с",
+    },
+    "failure_archive_limit": {
+        "en": "Archive contains too many media files. Split it or check the configured limit.",
+        "zh": "压缩包中的媒体文件过多，请拆分压缩包或检查配置的数量限制。",
+        "ja": "アーカイブ内のファイルが多すぎます。分割するか上限を確認してください。",
+        "ru": "В архиве слишком много файлов. Разделите архив или проверьте лимит.",
+    },
+    "stage_extract": {"en": "extract", "zh": "解压", "ja": "解凍", "ru": "распаковка"},
+    "failure_network": {
+        "en": "Network or service unavailable. Check the connection and try again later.",
+        "zh": "网络或服务暂时不可用，请检查连接后稍后重试。",
+        "ja": "ネットワークまたはサービスを確認し、後でもう一度お試しください。",
+        "ru": "Проверьте сеть и доступность сервиса, затем повторите попытку.",
+    },
+    "failure_access": {
+        "en": "Access denied. Ask the administrator to check credentials and permissions.",
+        "zh": "访问被拒绝，请联系管理员检查凭证和权限。",
+        "ja": "アクセスが拒否されました。管理者に認証情報と権限の確認を依頼してください。",
+        "ru": "Доступ запрещён. Попросите администратора проверить учётные данные и права.",
+    },
+    "failure_size": {
+        "en": "File is too large. Reduce its size or check the configured limit.",
+        "zh": "文件过大，请缩小文件或检查配置的大小限制。",
+        "ja": "ファイルが大きすぎます。サイズまたは設定された上限を確認してください。",
+        "ru": "Файл слишком велик. Уменьшите его или проверьте настроенный лимит.",
+    },
+    "failure_archive": {
+        "en": "Archive could not be extracted. Check for damage or a password and repack it.",
+        "zh": "无法解压，请检查压缩包是否损坏或加密，并重新打包。",
+        "ja": "解凍できません。破損やパスワードを確認し、再圧縮してください。",
+        "ru": "Не удалось распаковать архив. Проверьте его целостность и пароль.",
+    },
+    "failure_unknown": {
+        "en": "Operation failed. Check the server logs or contact the administrator.",
+        "zh": "操作失败，请检查服务日志或联系管理员。",
+        "ja": "処理に失敗しました。ログを確認するか管理者に連絡してください。",
+        "ru": "Операция не выполнена. Проверьте журнал или обратитесь к администратору.",
+    },
+    "failure_album_uncertain": {
+        "en": "Album creation could not be confirmed; assets were saved. Try again later.",
+        "zh": "无法确认相册是否创建；资产已保存，请稍后重新发送。",
+        "ja": "アルバムの作成を確認できません。保存済みのデータは保持されます。",
+        "ru": "Создание альбома не подтверждено; файлы сохранены. Повторите позже.",
+    },
+    "status_private_only": {
+        "en": "Please query /status in a private chat with the bot.",
+        "zh": "请在与机器人的私聊中查询 /status。",
+        "ja": "ボットとのプライベートチャットで /status を確認してください。",
+        "ru": "Проверьте /status в личном чате с ботом.",
+    },
+    "status_empty": {
+        "en": "No import records yet.",
+        "zh": "暂无导入记录。",
+        "ja": "インポート履歴はありません。",
+        "ru": "История импорта пуста.",
+    },
     "discord_too_large": {
         "en": "exceeds {limit} MiB",
         "zh": "超过 {limit} MiB",

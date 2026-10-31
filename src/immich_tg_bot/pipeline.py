@@ -11,7 +11,9 @@ from pathlib import Path
 from PIL import Image
 
 from .archives import extract, is_archive, walk_media
+from .errors import failure_kind
 from .immich import ImmichClient, sha1_file
+from .retry import report_stage
 from .state import State
 
 log = logging.getLogger(__name__)
@@ -43,6 +45,7 @@ class IngestSummary:
     errors: int = 0
     new_asset_ids: list[str] = field(default_factory=list)
     error_messages: list[str] = field(default_factory=list)
+    error_details: list[tuple[str, str, str]] = field(default_factory=list)
     skipped_messages: list[str] = field(default_factory=list)
 
 
@@ -117,6 +120,9 @@ class IngestionPipeline:
 
         album_groups: dict[str, dict[str, str]] = defaultdict(dict)
         for item in items:
+            name = item.original_file_name or item.file_name
+            stage = "extract" if is_archive(name) else "upload"
+            await report_stage(f"{stage}: {name}")
             await self._ingest_item(item, summary, album_groups)
 
         for album_key, assets in album_groups.items():
@@ -134,6 +140,7 @@ class IngestionPipeline:
                         summary.error_messages.append(
                             f"{name} ({asset_id}): {stage} {album_key}: {failures[asset_id]}"
                         )
+                        summary.error_details.append((name, stage, "failure_unknown"))
             except Exception as e:
                 log.warning(
                     "Failed to add %d asset(s) to album %r: %s",
@@ -144,6 +151,7 @@ class IngestionPipeline:
                 for asset_id, name in assets.items():
                     summary.errors += 1
                     summary.error_messages.append(f"{name} ({asset_id}): {stage} {album_key}: {e}")
+                    summary.error_details.append((name, stage, failure_kind(e, stage)))
 
         return summary
 
@@ -177,6 +185,13 @@ class IngestionPipeline:
                     err = f"{item.original_file_name or item.file_name}: extract: {e}"
                     summary.errors += 1
                     summary.error_messages.append(err)
+                    summary.error_details.append(
+                        (
+                            item.original_file_name or item.file_name,
+                            "extract",
+                            failure_kind(e, "extract"),
+                        )
+                    )
                     item_errors.append(err)
                     return
 
@@ -191,6 +206,7 @@ class IngestionPipeline:
                         f"{archive_name}: archive media count exceeds limit "
                         f"({self._max_archive_files})"
                     )
+                    summary.error_details.append((archive_name, "extract", "failure_archive_limit"))
                     return
                 if not media:
                     log.info("Archive %s contained no recognised media", item.local_path)
@@ -261,6 +277,7 @@ class IngestionPipeline:
             err = f"{error_name or file_name}: upload: {e}"
             summary.errors += 1
             summary.error_messages.append(err)
+            summary.error_details.append((error_name or file_name, "upload", failure_kind(e)))
             item_errors.append(err)
 
     async def _upload_one(

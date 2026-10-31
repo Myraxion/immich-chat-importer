@@ -15,7 +15,7 @@ A set of ingestion items processed together for one import request, with a combi
 _Avoid_: UploadJob, ImportTransaction
 
 **IngestRecord**:
-The queryable status and outcome of one ingestion batch, belonging to the user who requested the import. Records are available during the current service run and are discarded on restart.
+The queryable status and outcome of one ingestion batch, belonging to the requesting user on its source messaging platform, with Telegram and Discord identities kept separate. Records are available during the current service run and are discarded on restart.
 _Avoid_: RecoveryTask, ResumeJob
 
 **IngestionPipeline**:

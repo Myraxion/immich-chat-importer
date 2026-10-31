@@ -17,6 +17,7 @@ from aiogram.filters import Command
 from aiogram.types import Message, TelegramObject
 
 from .config import Settings
+from .errors import failure_kind, format_failure, format_progress
 from .i18n import resolve_language, t
 from .naming import (
     disambiguate_filenames,
@@ -25,7 +26,9 @@ from .naming import (
     split_filename,
 )
 from .pipeline import IngestionPipeline, IngestItem, IngestSummary, _exif_datetime
+from .retry import retry, retry_notice
 from .runtime import ingestion_runtime
+from .state import State
 from .telegram_metadata import extract_metadata
 
 log = logging.getLogger(__name__)
@@ -58,6 +61,45 @@ class WhitelistMiddleware(BaseMiddleware):
 
 def _sender_language_code(message: Message) -> str | None:
     return message.from_user.language_code if message.from_user else None
+
+
+async def handle_telegram_status(message: Message, state: State, default_lang: str) -> None:
+    lang = _sender_language_code(message)
+    if message.chat.type != "private":
+        await message.reply(t("status_private_only", lang_code=lang, default_lang=default_lang))
+        return
+    if message.from_user is None:
+        return
+    records = await state.recent_ingest_records(message.from_user.id, platform="telegram")
+    entries = []
+    for record in records:
+        status = t(f"record_{record.status}", lang_code=lang, default_lang=default_lang)
+        entry = (
+            f"#{record.id} | {record.created_at} UTC | {status} | "
+            f"{record.source_id}/{record.message_id}"
+        )
+        if record.status in ("waiting", "processing"):
+            entry += f"\n{record.progress}" if record.progress else ""
+        else:
+            entry += "\n" + t(
+                "discord_counts",
+                lang_code=lang,
+                default_lang=default_lang,
+                uploaded=record.uploaded,
+                duplicates=record.duplicates,
+                skipped=record.skipped,
+                errors=record.errors,
+            )
+            if record.details:
+                entry += f"\n{record.details}"
+        entries.append(entry)
+    content = (
+        "\n\n".join(entries)
+        if entries
+        else t("status_empty", lang_code=lang, default_lang=default_lang)
+    )
+    for start in range(0, len(content), 500):
+        await message.reply(html.escape(content[start : start + 500]))
 
 
 def _media_info_for(message: Message) -> tuple[str | None, str, str, str]:
@@ -116,7 +158,7 @@ def _media_info_for(message: Message) -> tuple[str | None, str, str, str]:
 
 async def _resolve_local_path(bot: Bot, file_id: str, telegram_files_dir: Path) -> Path:
     """Locate a file exposed by the local Bot API through the shared volume."""
-    tg_file = await bot.get_file(file_id)
+    tg_file = await retry(lambda: bot.get_file(file_id), "Telegram file retrieval")
     if tg_file.file_path is None:
         raise FileNotFoundError("Telegram returned no file_path")
     fp = Path(tg_file.file_path)
@@ -214,7 +256,15 @@ def format_summary_replies(
     replies = [_format_summary_counts(summary, resolve_errors, lang_code, default_lang)]
     if summary.error_messages:
         language = resolve_language(lang_code, default_lang=default_lang)
-        for message in summary.error_messages:
+        errors = (
+            [
+                format_failure(name, stage, kind, language, default_lang)
+                for name, stage, kind in summary.error_details
+            ]
+            if len(summary.error_details) == len(summary.error_messages)
+            else summary.error_messages
+        )
+        for message in errors:
             for stage, key in (
                 ("album lookup/create", "stage_album_lookup"),
                 ("album association", "stage_album_association"),
@@ -296,52 +346,122 @@ async def run_bot(settings: Settings, pipeline: IngestionPipeline | None = None)
     async def _process_messages(messages: list[Message]) -> None:
         head = messages[0]
         head_lang = _sender_language_code(head)
-        raw_items: list[tuple[IngestItem, str]] = []
-        resolve_errors = 0
-        for idx, m in enumerate(messages, start=1):
-            try:
-                item = await _extract_ingest_item(
-                    bot, m, settings.telegram_files_dir, settings=settings, index=idx
-                )
-                if item:
-                    raw_items.append((item, item.file_name))
-            except Exception as e:
-                log.exception("Could not get file for message %s", m.message_id)
-                with suppress(Exception):
-                    err_msg = t(
-                        "error_file_fetch",
-                        lang_code=head_lang,
-                        default_lang=settings.default_language,
-                        error=e,
-                    )
-                    await m.reply(err_msg)
-                resolve_errors += 1
-
-        filenames = [fn for _, fn in raw_items]
-        disambiguated = disambiguate_filenames(filenames)
-
-        items = [
-            IngestItem(
-                chat_id=it.chat_id,
-                message_id=it.message_id,
-                local_path=it.local_path,
-                file_name=final_fn,
-                created_at=it.created_at,
-                target_album=it.target_album,
-                original_file_name=it.original_file_name,
-            )
-            for (it, _), final_fn in zip(raw_items, disambiguated, strict=False)
-        ]
-
-        summary = await pipeline.ingest(items)
-        reply_texts = format_summary_replies(
-            summary,
-            resolve_errors=resolve_errors,
-            lang_code=head_lang,
-            default_lang=settings.default_language,
+        if head.from_user is None:
+            return
+        record_id = await pipeline.state.create_ingest_record(
+            head.from_user.id, str(head.chat.id), str(head.message_id), platform="telegram"
         )
-        for reply_text in reply_texts:
-            await head.reply(reply_text)
+        await pipeline.state.start_ingest_record(record_id)
+
+        async def notice(stage: str, attempt: int, delay: float) -> None:
+            await pipeline.state.set_ingest_progress(
+                record_id,
+                format_progress(stage, attempt, delay, head_lang, settings.default_language),
+            )
+
+        token = retry_notice.set(notice)
+        summary = IngestSummary()
+        resolve_errors = 0
+        fetch_details: list[str] = []
+        finished = False
+        try:
+            raw_items: list[tuple[IngestItem, str]] = []
+            for idx, m in enumerate(messages, start=1):
+                try:
+                    item = await _extract_ingest_item(
+                        bot, m, settings.telegram_files_dir, settings=settings, index=idx
+                    )
+                    if item:
+                        raw_items.append((item, item.file_name))
+                except Exception as e:
+                    log.exception("Could not get file for message %s", m.message_id)
+                    with suppress(Exception):
+                        name = _media_info_for(m)[3] or str(m.message_id)
+                        err_msg = format_failure(
+                            name, "download", failure_kind(e), head_lang, settings.default_language
+                        )
+                        fetch_details.append(err_msg)
+                        await m.reply(html.escape(err_msg))
+                    resolve_errors += 1
+
+            filenames = [fn for _, fn in raw_items]
+            disambiguated = disambiguate_filenames(filenames)
+
+            items = [
+                IngestItem(
+                    chat_id=it.chat_id,
+                    message_id=it.message_id,
+                    local_path=it.local_path,
+                    file_name=final_fn,
+                    created_at=it.created_at,
+                    target_album=it.target_album,
+                    original_file_name=it.original_file_name,
+                )
+                for (it, _), final_fn in zip(raw_items, disambiguated, strict=False)
+            ]
+
+            await pipeline.state.wait_ingest_record(record_id)
+            try:
+                summary = await pipeline.ingest(items, record_id=record_id, summary=summary)
+            except Exception as e:
+                log.exception("Telegram import failed")
+                summary.errors += 1
+                summary.error_messages.append(str(e))
+                summary.error_details.append((str(head.message_id), "upload", failure_kind(e)))
+            errors = summary.errors + resolve_errors
+            status = (
+                "partial"
+                if errors and (summary.uploaded or summary.duplicates)
+                else ("failed" if errors else "completed")
+            )
+            await pipeline.state.finish_ingest_record(
+                record_id,
+                status,
+                summary.uploaded,
+                summary.duplicates,
+                len(summary.skipped_messages),
+                errors,
+                "\n".join(
+                    fetch_details
+                    + [
+                        format_failure(name, stage, kind, head_lang, settings.default_language)
+                        for name, stage, kind in summary.error_details
+                    ]
+                ),
+            )
+            finished = True
+            reply_texts = format_summary_replies(
+                summary,
+                resolve_errors=resolve_errors,
+                lang_code=head_lang,
+                default_lang=settings.default_language,
+            )
+            for reply_text in reply_texts:
+                await head.reply(reply_text)
+
+        except Exception as exc:
+            log.exception("Telegram import failed")
+            if not finished:
+                detail = format_failure(
+                    str(head.message_id),
+                    "upload",
+                    failure_kind(exc),
+                    head_lang,
+                    settings.default_language,
+                )
+                await pipeline.state.finish_ingest_record(
+                    record_id,
+                    "partial" if summary.uploaded or summary.duplicates else "failed",
+                    summary.uploaded,
+                    summary.duplicates,
+                    len(summary.skipped_messages),
+                    summary.errors + resolve_errors + 1,
+                    "\n".join(fetch_details + [detail]),
+                )
+                with suppress(Exception):
+                    await head.reply(html.escape(detail))
+        finally:
+            retry_notice.reset(token)
 
     async def _flush_group(mg_id: str) -> None:
         try:
@@ -368,6 +488,10 @@ async def run_bot(settings: Settings, pipeline: IngestionPipeline | None = None)
         await message.reply(
             t("help", lang_code=sender_lang, default_lang=settings.default_language)
         )
+
+    @dp.message(Command("status"))
+    async def cmd_status(message: Message) -> None:
+        await handle_telegram_status(message, pipeline.state, settings.default_language)
 
     media_filter = F.photo | F.video | F.document | F.animation | F.audio | F.voice | F.video_note
 

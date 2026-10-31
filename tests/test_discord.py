@@ -161,6 +161,8 @@ async def test_limits_and_failed_download_do_not_stop_other_attachments(tmp_path
     assert fetched == [
         "https://cdn.test/large?sig=x",
         "https://cdn.test/bad?sig=secret",
+        "https://cdn.test/bad?sig=secret",
+        "https://cdn.test/bad?sig=secret",
         "https://cdn.test/ok?sig=y",
     ]
     assert len(uploaded) == 1
@@ -329,6 +331,7 @@ async def test_dm_imports_real_archive(tmp_path, monkeypatch):
     assert "readme.txt" in replies[0]
     assert "Uploaded: 1" in replies[0]
 
+
 async def test_status_remains_responsive_during_upload_and_waiting_batch(tmp_path, monkeypatch):
     import asyncio
 
@@ -350,7 +353,9 @@ async def test_status_remains_responsive_during_upload_and_waiting_batch(tmp_pat
         lambda **kw: original(**kw, transport=httpx.MockTransport(immich)),
     )
     settings = Settings.model_construct(
-        data_dir=tmp_path, immich_url="https://immich.test", immich_api_key="key",
+        data_dir=tmp_path,
+        immich_url="https://immich.test",
+        immich_api_key="key",
         discord_allowed_user_ids=[42],
     )
     author = SimpleNamespace(id=42, display_name="Alice", name="alice")
@@ -360,10 +365,15 @@ async def test_status_remains_responsive_during_upload_and_waiting_batch(tmp_pat
 
     def message(number):
         return SimpleNamespace(
-            id=number, channel=SimpleNamespace(id=20), author=author,
-            created_at=datetime.now(UTC), content="", reply=reply,
-            attachments=[SimpleNamespace(id=number, filename="a.jpg", size=1,
-                                         url="https://cdn.test/a")],
+            id=number,
+            channel=SimpleNamespace(id=20),
+            author=author,
+            created_at=datetime.now(UTC),
+            content="",
+            reply=reply,
+            attachments=[
+                SimpleNamespace(id=number, filename="a.jpg", size=1, url="https://cdn.test/a")
+            ],
         )
 
     responses = []
@@ -398,6 +408,7 @@ async def test_status_remains_responsive_during_upload_and_waiting_batch(tmp_pat
                 release.set()
                 await asyncio.wait_for(first, 2)
 
+
 async def test_status_denies_unlisted_users_and_reports_empty_history(tmp_path):
     from immich_tg_bot.discord_bot import handle_status
     from immich_tg_bot.state import State
@@ -412,7 +423,8 @@ async def test_status_denies_unlisted_users_and_reports_empty_history(tmp_path):
 
     settings = Settings.model_construct(discord_allowed_user_ids=[42, 43])
     interaction = SimpleNamespace(
-        user=SimpleNamespace(id=43), locale="en-US",
+        user=SimpleNamespace(id=43),
+        locale="en-US",
         response=SimpleNamespace(send_message=send_message),
     )
     pipeline = SimpleNamespace(state=state)
@@ -446,8 +458,12 @@ async def test_expired_menu_reply_keeps_upload_and_status(tmp_path, monkeypatch)
         lambda **kw: original(**kw, transport=httpx.MockTransport(immich)),
     )
     settings = Settings.model_construct(
-        data_dir=tmp_path, immich_url="https://immich.test", immich_api_key="key",
-        telegram_album_name=None, discord_album_name=None, discord_allowed_user_ids=[42],
+        data_dir=tmp_path,
+        immich_url="https://immich.test",
+        immich_api_key="key",
+        telegram_album_name=None,
+        discord_album_name=None,
+        discord_allowed_user_ids=[42],
     )
     responses = []
 
@@ -466,13 +482,19 @@ async def test_expired_menu_reply_keeps_upload_and_status(tmp_path, monkeypatch)
 
     author = SimpleNamespace(id=42, display_name="Alice", name="alice")
     interaction = SimpleNamespace(
-        user=author, locale="en-US", response=SimpleNamespace(defer=defer, send_message=send),
-        edit_original_response=expired, guild_id=None,
+        user=author,
+        locale="en-US",
+        response=SimpleNamespace(defer=defer, send_message=send),
+        edit_original_response=expired,
+        guild_id=None,
     )
     message = SimpleNamespace(
-        id=10, channel=SimpleNamespace(id=20), author=author, created_at=datetime.now(UTC),
-        content="", attachments=[SimpleNamespace(id=1, filename="a.jpg", size=1,
-                                                  url="https://cdn.test/a")],
+        id=10,
+        channel=SimpleNamespace(id=20),
+        author=author,
+        created_at=datetime.now(UTC),
+        content="",
+        attachments=[SimpleNamespace(id=1, filename="a.jpg", size=1, url="https://cdn.test/a")],
     )
     async with original(
         transport=httpx.MockTransport(lambda req: httpx.Response(200, content=b"a"))
@@ -539,8 +561,11 @@ async def test_restart_does_not_replay_and_manual_retry_finishes_album(tmp_path,
         lambda **kw: original(**kw, transport=httpx.MockTransport(immich)),
     )
     settings = Settings.model_construct(
-        data_dir=tmp_path, immich_url="https://immich.test", immich_api_key="key",
-        telegram_album_name=None, discord_allowed_user_ids=[42],
+        data_dir=tmp_path,
+        immich_url="https://immich.test",
+        immich_api_key="key",
+        telegram_album_name=None,
+        discord_allowed_user_ids=[42],
     )
     replies = []
 
@@ -555,13 +580,19 @@ async def test_restart_does_not_replay_and_manual_retry_finishes_album(tmp_path,
 
     author = SimpleNamespace(id=42, display_name="Alice", name="alice")
     interaction = SimpleNamespace(
-        user=author, locale="en-US", guild_id=None, edit_original_response=edit,
+        user=author,
+        locale="en-US",
+        guild_id=None,
+        edit_original_response=edit,
         response=SimpleNamespace(defer=defer, send_message=send),
     )
     message = SimpleNamespace(
-        id=10, channel=SimpleNamespace(id=20), author=author, created_at=datetime.now(UTC),
-        content="", attachments=[SimpleNamespace(id=1, filename="a.jpg", size=5,
-                                                  url="https://cdn.test/photo")],
+        id=10,
+        channel=SimpleNamespace(id=20),
+        author=author,
+        created_at=datetime.now(UTC),
+        content="",
+        attachments=[SimpleNamespace(id=1, filename="a.jpg", size=5, url="https://cdn.test/photo")],
     )
     async with original(transport=httpx.MockTransport(download)) as client:
         async with ingestion_runtime(settings) as pipeline:

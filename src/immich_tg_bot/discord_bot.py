@@ -12,9 +12,11 @@ from discord import app_commands
 
 from .archives import is_archive, is_media
 from .config import Settings
+from .errors import failure_kind, format_failure, format_progress
 from .i18n import resolve_language, t
 from .naming import MessageMetadata, resolve_album_name, resolve_filename, split_filename
 from .pipeline import IngestionPipeline, IngestItem, IngestSummary, _exif_datetime
+from .retry import retry, retry_notice
 from .runtime import ingestion_runtime
 
 log = logging.getLogger(__name__)
@@ -77,6 +79,8 @@ async def _process_import(
             errors.append(
                 f"{name}: "
                 + t("discord_too_large", lang_code=lang, limit=settings.discord_max_attachment_mb)
+                + ". "
+                + t("failure_size", lang_code=lang, default_lang=settings.default_language)
             )
             continue
         path = None
@@ -85,20 +89,25 @@ async def _process_import(
                 dir=download_dir, prefix="discord-", delete=False
             ) as f:
                 path = Path(f.name)
-                async with client.stream("GET", attachment.url) as response:
-                    response.raise_for_status()
-                    size = 0
-                    async for chunk in response.aiter_bytes():
-                        size += len(chunk)
-                        if size > limit:
-                            raise ValueError(
-                                t(
-                                    "discord_too_large",
-                                    lang_code=lang,
-                                    limit=settings.discord_max_attachment_mb,
+
+            async def download(download_path: Path = path, url: str = attachment.url) -> None:
+                with download_path.open("wb") as f:  # noqa: ASYNC230
+                    async with client.stream("GET", url) as response:
+                        response.raise_for_status()
+                        size = 0
+                        async for chunk in response.aiter_bytes():
+                            size += len(chunk)
+                            if size > limit:
+                                raise ValueError(
+                                    t(
+                                        "discord_too_large",
+                                        lang_code=lang,
+                                        limit=settings.discord_max_attachment_mb,
+                                    )
                                 )
-                            )
-                        f.write(chunk)
+                            f.write(chunk)
+
+            await retry(download, f"download: {name}")
             stem, extension = split_filename(name)
             exif_date = _exif_datetime(path)
             item_metadata = replace(
@@ -146,7 +155,14 @@ async def _process_import(
                 )
             )
             log.warning("Discord download failed for %s: %s", name, reason)
-            errors.append(f"{name}: {t('discord_download', lang_code=lang)}: {reason}")
+            safe = format_failure(
+                name,
+                "download",
+                "failure_size" if isinstance(exc, ValueError) else failure_kind(exc),
+                lang,
+                settings.default_language,
+            )
+            errors.append(f"{safe} ({reason})" if isinstance(exc, ValueError) else safe)
     try:
         summary = progress["summary"]
         if items:
@@ -161,7 +177,15 @@ async def _process_import(
                 except OSError:
                     progress["stage"] = f"{item.original_file_name}: cleanup"
                     raise
-    errors = [*errors, *summary.error_messages]
+    summary_errors = (
+        [
+            format_failure(name, stage, kind, lang, settings.default_language)
+            for name, stage, kind in summary.error_details
+        ]
+        if len(summary.error_details) == len(summary.error_messages)
+        else summary.error_messages
+    )
+    errors = [*errors, *summary_errors]
     skipped = [*skipped, *summary.skipped_messages]
     counts = t(
         "discord_counts",
@@ -169,7 +193,7 @@ async def _process_import(
         uploaded=summary.uploaded,
         duplicates=summary.duplicates,
         skipped=len(skipped),
-        errors=summary.errors + len(errors) - len(summary.error_messages),
+        errors=summary.errors + len(errors) - len(summary_errors),
     )
     details = [*(f"{name}: {t('discord_skipped', lang_code=lang)}" for name in skipped), *errors]
     return "\n".join([counts, *details]), summary, skipped, errors
@@ -195,6 +219,17 @@ async def process_import(
         "skipped": [],
         "stage": "preparation",
     }
+
+    async def notice(stage: str, attempt: int, delay: float) -> None:
+        locale = getattr(interaction, "locale", None) if interaction else None
+        await state.set_ingest_progress(
+            record_id,
+            format_progress(
+                stage, attempt, delay, str(locale) if locale else None, settings.default_language
+            ),
+        )
+
+    token = retry_notice.set(notice)
     try:
         await state.start_ingest_record(record_id)
         result, summary, skipped, errors = await _process_import(
@@ -219,7 +254,17 @@ async def process_import(
     except Exception as exc:
         log.exception("Discord import failed")
         summary = progress["summary"]
-        errors = progress["errors"] + summary.error_messages + [f"{progress['stage']}: {exc}"]
+        locale = getattr(interaction, "locale", None) if interaction else None
+        lang = str(locale) if locale else None
+        errors = progress["errors"] + [
+            format_failure(name, stage, kind, lang, settings.default_language)
+            for name, stage, kind in summary.error_details
+        ]
+        errors.append(
+            format_failure(
+                "Import", progress["stage"], failure_kind(exc), lang, settings.default_language
+            )
+        )
         skipped = progress["skipped"] + summary.skipped_messages
         await state.finish_ingest_record(
             record_id,
@@ -230,7 +275,18 @@ async def process_import(
             summary.errors + len(progress["errors"]) + 1,
             "\n".join(errors),
         )
-        return f"Import failed: {exc}"
+        counts = t(
+            "discord_counts",
+            lang_code=lang,
+            default_lang=settings.default_language,
+            uploaded=summary.uploaded,
+            duplicates=summary.duplicates,
+            skipped=len(skipped),
+            errors=summary.errors + len(progress["errors"]) + 1,
+        )
+        return "\n".join([counts, *errors])
+    finally:
+        retry_notice.reset(token)
 
 
 async def handle_status(interaction: Any, settings: Settings, pipeline: IngestionPipeline) -> None:
@@ -243,6 +299,9 @@ async def handle_status(interaction: Any, settings: Settings, pipeline: Ingestio
         records = await pipeline.state.recent_ingest_records(interaction.user.id)
         entries = []
         for record in records:
+            status = t(
+                f"record_{record.status}", lang_code=lang, default_lang=settings.default_language
+            )
             counts = t(
                 "discord_counts",
                 lang_code=lang,
@@ -252,11 +311,13 @@ async def handle_status(interaction: Any, settings: Settings, pipeline: Ingestio
                 errors=record.errors,
             )
             entries.append(
-                f"#{record.id} | {record.created_at} UTC | {record.status} | "
-                f"{record.source_id}/{record.message_id}\n{counts}"
+                f"#{record.id} | {record.created_at} UTC | {status} | "
+                f"{record.source_id}/{record.message_id}"
+                + (f"\n{record.progress}" if record.progress else "")
+                + (f"\n{counts}" if record.status not in ("waiting", "processing") else "")
                 + (f"\n{record.details}" if record.details else "")
             )
-        content = "\n\n".join(entries) if entries else "No import records yet."
+        content = "\n\n".join(entries) if entries else t("status_empty", lang_code=lang)
     await interaction.response.send_message(
         content[:2000], ephemeral=True, allowed_mentions=discord.AllowedMentions.none()
     )

@@ -6,6 +6,8 @@ from typing import Any
 
 import httpx
 
+from .retry import retry
+
 log = logging.getLogger(__name__)
 
 
@@ -57,39 +59,65 @@ class ImmichClient:
         if checksum:
             headers["x-immich-checksum"] = checksum
         upload_name = file_name or file_path.name
-        with file_path.open("rb") as f:
-            files = {"assetData": (upload_name, f, "application/octet-stream")}
-            data = {
-                "deviceAssetId": device_asset_id,
-                "deviceId": device_id,
-                "fileCreatedAt": file_created_at.isoformat(),
-                "fileModifiedAt": file_modified_at.isoformat(),
-            }
-            r = await self._client.post("/assets", files=files, data=data, headers=headers)
-        r.raise_for_status()
-        return r.json()
+
+        async def upload() -> dict[str, Any]:
+            with file_path.open("rb") as f:
+                files = {"assetData": (upload_name, f, "application/octet-stream")}
+                data = {
+                    "deviceAssetId": device_asset_id,
+                    "deviceId": device_id,
+                    "fileCreatedAt": file_created_at.isoformat(),
+                    "fileModifiedAt": file_modified_at.isoformat(),
+                }
+                r = await self._client.post("/assets", files=files, data=data, headers=headers)
+            r.raise_for_status()
+            return r.json()
+
+        return await retry(upload, f"upload: {upload_name}")
 
     async def get_or_create_album(self, name: str) -> str:
-        r = await self._client.get("/albums")
-        r.raise_for_status()
-        for album in r.json():
-            if album.get("albumName") == name:
-                return album["id"]
-        r = await self._client.post("/albums", json={"albumName": name})
-        r.raise_for_status()
-        album_id = r.json()["id"]
-        return album_id
+        async def lookup() -> str | None:
+            r = await self._client.get("/albums")
+            r.raise_for_status()
+            for album in r.json():
+                if album.get("albumName") == name:
+                    return album["id"]
+            return None
+
+        existing = await retry(lookup, f"album lookup: {name}")
+        if existing:
+            return existing
+        try:
+            r = await self._client.post("/albums", json={"albumName": name})
+            r.raise_for_status()
+            return r.json()["id"]
+        except (httpx.TimeoutException, httpx.NetworkError, httpx.HTTPStatusError) as exc:
+            if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code not in (
+                500,
+                502,
+                503,
+                504,
+            ):
+                raise
+            try:
+                existing = await retry(lookup, f"album lookup: {name}")
+            except httpx.HTTPError:
+                existing = None
+            if existing:
+                return existing
+            raise RuntimeError(f"Album creation could not be confirmed: {name}") from exc
 
     async def add_to_album(self, album_id: str, asset_ids: list[str]) -> dict[str, str]:
         if not asset_ids:
             return {}
-        r = await self._client.put(
-            f"/albums/{album_id}/assets",
-            json={"ids": asset_ids},
-        )
-        r.raise_for_status()
-        return {
-            result["id"]: result.get("error", "unknown")
-            for result in r.json()
-            if not result["success"] and result.get("error") != "duplicate"
-        }
+
+        async def associate() -> dict[str, str]:
+            r = await self._client.put(f"/albums/{album_id}/assets", json={"ids": asset_ids})
+            r.raise_for_status()
+            return {
+                result["id"]: result.get("error", "unknown")
+                for result in r.json()
+                if not result["success"] and result.get("error") != "duplicate"
+            }
+
+        return await retry(associate, f"album association: {album_id}")
