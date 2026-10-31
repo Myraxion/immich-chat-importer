@@ -1,7 +1,7 @@
 services:
-  immich-telegram-bot:
-    image: ghcr.io/myraxion/immich-telegram-bot:latest
-    container_name: immich-telegram-bot
+  immich-chat-importer:
+    image: ghcr.io/myraxion/immich-chat-importer:latest
+    container_name: immich-chat-importer
     restart: unless-stopped
     env_file: .env
     environment:

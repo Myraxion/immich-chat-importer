@@ -1,5 +1,5 @@
 [project]
-name = "immich-telegram-bot"
+name = "immich-chat-importer"
 version = "0.1.5"
 description = "Self-hosted bot that imports media from Telegram and Discord into Immich."
 readme = "README.md"
@@ -36,10 +36,11 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/myraxion/immich-telegram-bot"
-Issues = "https://github.com/myraxion/immich-telegram-bot/issues"
+Homepage = "https://github.com/myraxion/immich-chat-importer"
+Issues = "https://github.com/myraxion/immich-chat-importer/issues"
 
 [project.scripts]
+immich-chat-importer = "immich_tg_bot.__main__:main"
 immich-telegram-bot = "immich_tg_bot.__main__:main"
 
 [build-system]

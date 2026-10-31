@@ -1,4 +1,4 @@
-# immich-telegram-bot
+# immich-chat-importer
 
 > Self-hosted bot that imports media from Telegram and Discord into your [Immich](https://immich.app) library.
 
@@ -6,10 +6,10 @@ English | [简体中文](README_zh.md)
 
 Run Telegram, Discord, or both in one process. See the [Discord and combined deployment guide](docs/discord-deployment.md) for Discord setup and operation.
 
-[![Release](https://img.shields.io/github/v/release/myraxion/immich-telegram-bot?display_name=tag&sort=semver)](https://github.com/myraxion/immich-telegram-bot/releases)
-[![Docker image](https://img.shields.io/badge/ghcr.io-immich--telegram--bot-blue?logo=docker)](https://github.com/myraxion/immich-telegram-bot/pkgs/container/immich-telegram-bot)
+[![Release](https://img.shields.io/github/v/release/myraxion/immich-chat-importer?display_name=tag&sort=semver)](https://github.com/myraxion/immich-chat-importer/releases)
+[![Docker image](https://img.shields.io/badge/ghcr.io-immich--chat--importer-blue?logo=docker)](https://github.com/myraxion/immich-chat-importer/pkgs/container/immich-chat-importer)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-orange.svg)](LICENSE)
-[![CI](https://github.com/myraxion/immich-telegram-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/myraxion/immich-telegram-bot/actions/workflows/ci.yml)
+[![CI](https://github.com/myraxion/immich-chat-importer/actions/workflows/ci.yml/badge.svg)](https://github.com/myraxion/immich-chat-importer/actions/workflows/ci.yml)
 
 Forward media to the Telegram bot, send attachments to the Discord bot in a DM, or use Discord’s **Apps → Save to Immich** message command. Imports share one Immich account, exact-content deduplication, and album routing.
 
@@ -48,10 +48,10 @@ The quick start and configuration table below describe the default Telegram depl
 You need a working Immich instance and Docker installed.
 
 ```bash
-mkdir immich-telegram-bot && cd immich-telegram-bot
+mkdir immich-chat-importer && cd immich-chat-importer
 
-curl -O https://raw.githubusercontent.com/myraxion/immich-telegram-bot/main/docker-compose.yml
-curl -o .env https://raw.githubusercontent.com/myraxion/immich-telegram-bot/main/.env.example
+curl -O https://raw.githubusercontent.com/myraxion/immich-chat-importer/main/docker-compose.yml
+curl -o .env https://raw.githubusercontent.com/myraxion/immich-chat-importer/main/.env.example
 
 # Fill in the 6 required values (see "Detailed setup" below)
 ${EDITOR:-nano} .env
@@ -93,7 +93,7 @@ The bundled local Bot API server needs Telegram application credentials to authe
 If you run the bot in a separate Compose project, also attach it to Immich's network:
 
 ```yaml
-# add to docker-compose.yml under immich-telegram-bot:
+# add to docker-compose.yml under immich-chat-importer:
 networks: [immich, default]
 networks:
   immich:
@@ -111,7 +111,7 @@ Multiple users? Comma-separated: `ALLOWED_USER_IDS=11111111,22222222`.
 
 ```bash
 docker compose up -d
-docker compose logs -f immich-telegram-bot
+docker compose logs -f immich-chat-importer
 ```
 
 On a clean start you should see something like:
@@ -157,9 +157,11 @@ The bottom three rarely need to change — they match the default `docker-compos
 - **Photos sent as Picture lose EXIF and are recompressed by Telegram.** The bot still uploads them, but timestamps will use the message date and not the original capture date. Send as **Document/File** to preserve everything.
 - **First start of `telegram-bot-api` initialises a per-bot directory** and takes ~10–30 seconds. The bot may log a few connection retries during that window; it will settle.
 - **`tg-files` named volume can grow** since the local Bot API server keeps each downloaded file until you call `deleteFile`. The bot does not currently delete them; safe to `docker compose down -v` periodically if you don't need history.
-- **Compose network**: by default the `immich-telegram-bot` service can reach `telegram-bot-api` (same Compose project network) but **not your Immich instance** unless they share a network. See step 4 above.
+- **Compose network**: by default the `immich-chat-importer` service can reach `telegram-bot-api` (same Compose project network) but **not your Immich instance** unless they share a network. See step 4 above.
 
 ## Updating
+
+For an existing `immich-telegram-bot` deployment, stop the old Compose stack before starting the renamed service to avoid container conflicts. Keep and back up `./data` to preserve ingestion state. The `immich-telegram-bot` CLI remains available as an alias. The new image must be published before pulling it.
 
 ```bash
 docker compose pull
@@ -178,8 +180,8 @@ The Immich library is untouched — uploaded assets stay there.
 ## Development
 
 ```bash
-git clone https://github.com/myraxion/immich-telegram-bot.git
-cd immich-telegram-bot
+git clone https://github.com/myraxion/immich-chat-importer.git
+cd immich-chat-importer
 
 # Using uv (recommended):
 uv sync --all-extras --dev
@@ -188,13 +190,13 @@ uv sync --all-extras --dev
 # python -m venv .venv && . .venv/bin/activate && pip install -e ".[dev]"
 
 # Build a local image and run with compose:
-docker build -t local/immich-telegram-bot .
-# edit docker-compose.yml: image: local/immich-telegram-bot
+docker build -t local/immich-chat-importer .
+# edit docker-compose.yml: image: local/immich-chat-importer
 docker compose up
 ```
 
 CI runs `ruff` lint/format, `pytest`, and a Docker build smoke-test on every PR.
-Releases are cut by pushing a `vX.Y.Z` tag — that triggers a multi-arch build pushed to `ghcr.io/myraxion/immich-telegram-bot`.
+Releases are cut by pushing a `vX.Y.Z` tag — that triggers a multi-arch build pushed to `ghcr.io/myraxion/immich-chat-importer`.
 
 ## License
 

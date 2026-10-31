@@ -482,7 +482,7 @@ wheels = [
 ]
 
 [[package]]
-name = "immich-telegram-bot"
+name = "immich-chat-importer"
 version = "0.1.5"
 source = { editable = "." }
 dependencies = [

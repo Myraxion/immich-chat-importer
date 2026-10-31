@@ -1,4 +1,4 @@
-# immich-telegram-bot
+# immich-chat-importer
 
 > 自托管机器人，将 Telegram 和 Discord 中的媒体导入你的 [Immich](https://immich.app) 相册库。
 
@@ -6,10 +6,10 @@
 
 支持在同一进程中运行 Telegram、Discord 或两者。Discord 配置及使用方法请参阅 [Discord 与双平台部署指南](docs/discord-deployment.md)。
 
-[![Release](https://img.shields.io/github/v/release/myraxion/immich-telegram-bot?display_name=tag&sort=semver)](https://github.com/myraxion/immich-telegram-bot/releases)
-[![Docker image](https://img.shields.io/badge/ghcr.io-immich--telegram--bot-blue?logo=docker)](https://github.com/myraxion/immich-telegram-bot/pkgs/container/immich-telegram-bot)
+[![Release](https://img.shields.io/github/v/release/myraxion/immich-chat-importer?display_name=tag&sort=semver)](https://github.com/myraxion/immich-chat-importer/releases)
+[![Docker image](https://img.shields.io/badge/ghcr.io-immich--chat--importer-blue?logo=docker)](https://github.com/myraxion/immich-chat-importer/pkgs/container/immich-chat-importer)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-orange.svg)](LICENSE)
-[![CI](https://github.com/myraxion/immich-telegram-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/myraxion/immich-telegram-bot/actions/workflows/ci.yml)
+[![CI](https://github.com/myraxion/immich-chat-importer/actions/workflows/ci.yml/badge.svg)](https://github.com/myraxion/immich-chat-importer/actions/workflows/ci.yml)
 
 将媒体转发给 Telegram 机器人，向 Discord 机器人私信发送附件，或通过 Discord 消息的 **Apps → 保存到 Immich** 导入。两平台共用一个 Immich 账号、精确内容去重与相册归档能力。
 
@@ -48,10 +48,10 @@ Discord → Gateway ───────┘
 你需要一个已正常运行的 Immich 实例并安装好 Docker。
 
 ```bash
-mkdir immich-telegram-bot && cd immich-telegram-bot
+mkdir immich-chat-importer && cd immich-chat-importer
 
-curl -O https://raw.githubusercontent.com/myraxion/immich-telegram-bot/main/docker-compose.yml
-curl -o .env https://raw.githubusercontent.com/myraxion/immich-telegram-bot/main/.env.example
+curl -O https://raw.githubusercontent.com/myraxion/immich-chat-importer/main/docker-compose.yml
+curl -o .env https://raw.githubusercontent.com/myraxion/immich-chat-importer/main/.env.example
 
 # 填入 6 项必填配置（详见下文“详细配置步骤”）
 ${EDITOR:-nano} .env
@@ -93,7 +93,7 @@ docker compose up -d
 如果你在独立的 Compose 项目中运行机器人，还需要将其加入 Immich 的网络：
 
 ```yaml
-# 在 docker-compose.yml 的 immich-telegram-bot 服务下添加：
+# 在 docker-compose.yml 的 immich-chat-importer 服务下添加：
 networks: [immich, default]
 networks:
   immich:
@@ -111,7 +111,7 @@ networks:
 
 ```bash
 docker compose up -d
-docker compose logs -f immich-telegram-bot
+docker compose logs -f immich-chat-importer
 ```
 
 正常启动时，日志输出大致如下：
@@ -156,9 +156,11 @@ INFO immich_tg_bot.bot: Bot starting (allowed users: [...], album: Telegram Inbo
 - **直接以“图片”发送的照片会丢失 EXIF 并被 Telegram 重新压缩**：机器人依然会正常上传，但时间戳将使用 Telegram 消息时间，而非原始拍摄日期。如果需要完整保留元数据，请以**“文件/文档”**（Document/File）形式发送。
 - **首次启动 `telegram-bot-api` 时需要初始化机器人专属目录**，耗时约 10–30 秒。在此期间机器人可能会打印几次连接重试日志，之后会自动恢复正常。
 - **`tg-files` 数据卷占用可能会持续增长**：本地 Bot API 服务端会保留下载的文件直到调用 `deleteFile`。目前机器人暂不自动删除它们；如果不需保留历史缓存，可以定期执行 `docker compose down -v` 清理。
-- **Compose 网络**：默认情况下 `immich-telegram-bot` 服务可以访问 `telegram-bot-api`（同一 Compose 网络），但**无法访问你的 Immich 实例**，除非它们加入同一网络。请参考上文第 4 步。
+- **Compose 网络**：默认情况下 `immich-chat-importer` 服务可以访问 `telegram-bot-api`（同一 Compose 网络），但**无法访问你的 Immich 实例**，除非它们加入同一网络。请参考上文第 4 步。
 
 ## 更新
+
+从原 `immich-telegram-bot` 部署升级时，先停止旧 Compose 服务，再启动改名后的服务，避免容器冲突。保留并备份 `./data` 以保存导入状态。旧的 `immich-telegram-bot` 命令仍可作为别名使用；新镜像发布后才能拉取。
 
 ```bash
 docker compose pull
@@ -177,8 +179,8 @@ Immich 中的照片库不受任何影响 —— 已上传的资源依然保留�
 ## 本地开发
 
 ```bash
-git clone https://github.com/myraxion/immich-telegram-bot.git
-cd immich-telegram-bot
+git clone https://github.com/myraxion/immich-chat-importer.git
+cd immich-chat-importer
 
 # 使用 uv（推荐）：
 uv sync --all-extras --dev
@@ -187,13 +189,13 @@ uv sync --all-extras --dev
 # python -m venv .venv && . .venv/bin/activate && pip install -e ".[dev]"
 
 # 构建本地镜像并使用 Compose 运行：
-docker build -t local/immich-telegram-bot .
-# 修改 docker-compose.yml 中的镜像为：image: local/immich-telegram-bot
+docker build -t local/immich-chat-importer .
+# 修改 docker-compose.yml 中的镜像为：image: local/immich-chat-importer
 docker compose up
 ```
 
 每次 PR 时 CI 会自动运行 `ruff` 代码检查/格式化、`pytest` 单元测试以及 Docker 构建冒烟测试。
-发布新版本时，推送 `vX.Y.Z` 标签将自动触发多架构镜像构建并发布至 `ghcr.io/myraxion/immich-telegram-bot`。
+发布新版本时，推送 `vX.Y.Z` 标签将自动触发多架构镜像构建并发布至 `ghcr.io/myraxion/immich-chat-importer`。
 
 ## 开源协议
 
