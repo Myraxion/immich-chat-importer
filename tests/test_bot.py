@@ -35,6 +35,56 @@ async def test_telegram_status_only_shows_callers_telegram_records():
     assert f"#{other_id}" not in replies[0]
 
 
+@pytest.mark.parametrize(
+    "tz, expected",
+    [
+        ("Asia/Shanghai", "2026-11-01 03:14:23 Asia/Shanghai"),
+        ("UTC", "2026-10-31 19:14:23 UTC"),
+    ],
+)
+async def test_telegram_status_uses_configured_timezone(tmp_path, monkeypatch, tz, expected):
+    from aiogram import Dispatcher
+
+    from immich_tg_bot.bot import run_bot
+    from immich_tg_bot.config import Settings
+    from immich_tg_bot.state import State
+
+    monkeypatch.setenv("TZ", tz)
+    monkeypatch.setattr("immich_tg_bot.state._timestamp", lambda: "2026-10-31 19:14:23")
+    settings = Settings(
+        _env_file=None,
+        immich_url="https://immich.test",
+        immich_api_key="test-key",
+        telegram_bot_token="123456:test-token",
+        telegram_api_id=12345,
+        telegram_api_hash="test-hash",
+        telegram_allowed_user_ids=[42],
+        data_dir=tmp_path,
+    )
+    state = State()
+    await state.create_ingest_record(42, "1", "10", platform="telegram")
+    replies = []
+
+    async def reply(text):
+        replies.append(text)
+
+    message = SimpleNamespace(
+        chat=SimpleNamespace(type="private"),
+        from_user=SimpleNamespace(id=42, language_code="en"),
+        reply=reply,
+    )
+
+    async def poll(dispatcher, bot, **kwargs):
+        handler = next(
+            h for h in dispatcher.message.handlers if h.callback.__name__ == "cmd_status"
+        )
+        await handler.callback(message)
+
+    monkeypatch.setattr(Dispatcher, "start_polling", poll)
+    await run_bot(settings, SimpleNamespace(state=state))
+    assert expected in replies[0]
+
+
 class FakeBot:
     def __init__(self, token: str, file_path: str | None) -> None:
         self.token = token

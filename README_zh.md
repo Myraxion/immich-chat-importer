@@ -185,7 +185,7 @@ INFO immich_tg_bot.discord_bot: Discord bot starting (allowed users: [...], albu
 | `DISCORD_ALBUM_NAME_TEMPLATE` |  | *(留空)* | Discord 动态相册模板。若未命中则回退至 `DISCORD_ALBUM_NAME`。 |
 | `DISCORD_MAX_ATTACHMENT_MB` |  | `2000` | 单个 Discord 附件大小上限（MiB）。 |
 | **通用与高级配置** |  |  | |
-| `TZ` |  | `UTC` | 文件名及相册日期的时区（例如 `Asia/Shanghai`）。 |
+| `TZ` |  | `UTC` | 文件名、相册日期及 `/status` 时间的时区（例如 `Asia/Shanghai`）。 |
 | `DEFAULT_LANGUAGE` |  | `en` | 默认回退回复语言（`en`、`zh`、`ja`、`ru`）。 |
 | `MAX_ARCHIVE_MB` |  | `2000` | 允许传入的压缩包大小上限（MB）。 |
 | `MAX_ARCHIVE_FILES` |  | `1000` | 单个压缩包的媒体条目数量上限；超限时上传前拒绝整个包。 |
@@ -289,6 +289,7 @@ DISCORD_ALBUM_NAME_TEMPLATE={source}_{date:%Y-%m}
 
 ### Discord
 
+- **转发消息**：支持在机器人私信和消息菜单中导入 Discord 原生转发消息快照内的附件。命名使用转发这条消息的发送者、时间和所在对话信息。
 - **附件类型与压缩包限制**：支持照片、视频和压缩包（ZIP、RAR、7z、tar 系列，包含普通子目录），跳过嵌套压缩包和非媒体内容；不支持加密或无效的压缩包。单个附件大小上限由 `DISCORD_MAX_ATTACHMENT_MB` 控制。
 - **隐私与权限**：机器人不监听任意群聊消息，仅接收直接私信与手动通过消息菜单触发的导入。菜单回复仅调用者本人可见。
 - **状态记录**：`/status` 查询的导入记录仅保存在内存中，重启后清空，不会自动恢复未完成的任务。

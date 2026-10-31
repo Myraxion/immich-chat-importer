@@ -497,7 +497,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aiogram", specifier = ">=3.4,<4" },
-    { name = "discord-py", specifier = ">=2.4,<3" },
+    { name = "discord-py", specifier = ">=2.5,<3" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.9" },
     { name = "pillow", specifier = ">=10.2" },

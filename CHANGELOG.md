@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Telegram 和 Discord 的 `/status` 按 `TZ` 配置显示时间和时区，修复始终显示 UTC 的问题。
+- Discord 私信和消息菜单支持导入原生转发消息快照中的附件，修复转发图片时结果全部为 0 的问题。
+
 ## [0.1.5] - 2026-10-21
 
 ### 🛠️ 修复媒体上传失败

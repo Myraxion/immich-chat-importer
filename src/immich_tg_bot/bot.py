@@ -63,7 +63,9 @@ def _sender_language_code(message: Message) -> str | None:
     return message.from_user.language_code if message.from_user else None
 
 
-async def handle_telegram_status(message: Message, state: State, default_lang: str) -> None:
+async def handle_telegram_status(
+    message: Message, state: State, default_lang: str, tz: str = "UTC"
+) -> None:
     lang = _sender_language_code(message)
     if message.chat.type != "private":
         await message.reply(t("status_private_only", lang_code=lang, default_lang=default_lang))
@@ -75,7 +77,7 @@ async def handle_telegram_status(message: Message, state: State, default_lang: s
     for record in records:
         status = t(f"record_{record.status}", lang_code=lang, default_lang=default_lang)
         entry = (
-            f"#{record.id} | {record.created_at} UTC | {status} | "
+            f"#{record.id} | {record.format_created_at(tz)} | {status} | "
             f"{record.source_id}/{record.message_id}"
         )
         if record.status in ("waiting", "processing"):
@@ -491,7 +493,9 @@ async def run_bot(settings: Settings, pipeline: IngestionPipeline | None = None)
 
     @dp.message(Command("status"))
     async def cmd_status(message: Message) -> None:
-        await handle_telegram_status(message, pipeline.state, settings.default_language)
+        await handle_telegram_status(
+            message, pipeline.state, settings.default_language, settings.tz
+        )
 
     media_filter = F.photo | F.video | F.document | F.animation | F.audio | F.voice | F.video_note
 

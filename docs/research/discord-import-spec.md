@@ -1,5 +1,7 @@
 ## Problem Statement
 
+Scope update (2026-10-31): native forwarded-message snapshot attachments are now supported through both bot DMs and message menu imports, as requested after real-account usage. They follow the same type, size, archive, and result-reporting rules as direct attachments. Naming uses the forwarding message's metadata because snapshots do not expose the original author. `/status` timestamps on both platforms use the configured `TZ`.
+
 Users who keep their photo and video library in Immich cannot currently import Discord attachments through this project. They must download files and upload them manually, even though the existing Telegram integration already provides ingestion, archive extraction, deduplication, naming, and album routing.
 
 Users need two deliberate, one-way import actions: sending attachments to the bot in a direct message, and selecting a message through Discord's Apps context menu to save its attachments to Immich. The personal message-menu action must work in supported servers and private conversations without requiring the bot to join every server.
@@ -109,7 +111,7 @@ Run Telegram only, Discord only, or both adapters in one process. Serialize inge
 - Immich-to-Discord export, two-way synchronization, deletion propagation, or historical-channel harvesting.
 - Watching arbitrary server conversations or other people's private messages without an explicit supported action.
 - Selecting individual attachments after invoking the message menu, or choosing a target album interactively.
-- Downloading external webpages, embed previews, stickers, or media inside Discord forwarded-message snapshots.
+- Downloading external webpages, embed previews, or stickers.
 - Recursive nested-archive extraction, archive password input, or importing the archive itself as an Immich media asset.
 - Perceptual/similarity deduplication, transcoding, or a new media metadata/date interpretation policy.
 - Automatically replayed persistent queues, automatic restart recovery, or a new automatic retry scheduler; users retrigger failed or interrupted work.

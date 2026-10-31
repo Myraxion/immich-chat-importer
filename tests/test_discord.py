@@ -9,6 +9,136 @@ from immich_tg_bot.discord_bot import handle_dm
 from immich_tg_bot.runtime import ingestion_runtime
 
 
+@pytest.mark.parametrize(
+    "tz, expected",
+    [
+        ("Asia/Shanghai", "2026-11-01 03:14:23 Asia/Shanghai"),
+        ("UTC", "2026-10-31 19:14:23 UTC"),
+    ],
+)
+async def test_discord_status_uses_configured_timezone(monkeypatch, tz, expected):
+    from immich_tg_bot.discord_bot import handle_status
+    from immich_tg_bot.state import State
+
+    monkeypatch.setenv("TZ", tz)
+    monkeypatch.setattr("immich_tg_bot.state._timestamp", lambda: "2026-10-31 19:14:23")
+    settings = Settings(
+        _env_file=None,
+        enabled_platforms=["discord"],
+        discord_token="test-token",
+        discord_allowed_user_ids=[42],
+        immich_url="https://immich.test",
+        immich_api_key="test-key",
+    )
+    state = State()
+    await state.create_ingest_record(42, "20", "10")
+    replies = []
+
+    async def send_message(content, **kwargs):
+        replies.append(content)
+
+    interaction = SimpleNamespace(
+        user=SimpleNamespace(id=42),
+        locale="en-US",
+        response=SimpleNamespace(send_message=send_message),
+    )
+    await handle_status(interaction, settings, SimpleNamespace(state=state))
+    assert expected in replies[0]
+
+
+@pytest.mark.parametrize("entrypoint", ["dm", "menu"])
+async def test_forwarded_attachments_are_imported(tmp_path, monkeypatch, entrypoint):
+    import discord
+
+    from immich_tg_bot.discord_bot import handle_menu
+
+    uploads = []
+    downloads = []
+    replies = []
+    original = httpx.AsyncClient
+
+    def immich(request):
+        uploads.append(request.content)
+        return httpx.Response(201, json={"id": str(len(uploads)), "status": "created"})
+
+    monkeypatch.setattr(
+        "immich_tg_bot.immich.httpx.AsyncClient",
+        lambda **kw: original(**kw, transport=httpx.MockTransport(immich)),
+    )
+    snapshot = discord.MessageSnapshot(
+        state=SimpleNamespace(http=None),
+        data={
+            "type": 0,
+            "content": "forwarded photos",
+            "embeds": [],
+            "timestamp": "2026-10-30T12:00:00+00:00",
+            "edited_timestamp": None,
+            "attachments": [
+                {
+                    "id": str(i),
+                    "filename": name,
+                    "size": 5,
+                    "url": f"https://cdn.test/{name}?sig=test",
+                    "proxy_url": f"https://cdn.test/{name}",
+                }
+                for i, name in enumerate(["a.jpg", "b.mp4", "note.txt"], 1)
+            ],
+        },
+    )
+
+    async def reply(content, **kwargs):
+        replies.append(content)
+
+    async def defer(**kwargs):
+        pass
+
+    async def edit_original_response(**kwargs):
+        replies.append(kwargs["content"])
+
+    message = SimpleNamespace(
+        id=10,
+        channel=SimpleNamespace(id=20),
+        author=SimpleNamespace(id=42, display_name="Alice", name="alice"),
+        created_at=datetime(2026, 10, 31, tzinfo=UTC),
+        content="",
+        attachments=[],
+        message_snapshots=[snapshot],
+        reply=reply,
+    )
+    settings = Settings.model_construct(
+        data_dir=tmp_path,
+        immich_url="https://immich.test",
+        immich_api_key="test-key",
+        discord_allowed_user_ids=[42],
+        discord_album_name=None,
+    )
+
+    def download(request):
+        downloads.append(request.url.path)
+        return httpx.Response(200, content=request.url.path.encode())
+
+    async with original(transport=httpx.MockTransport(download)) as client:
+        async with ingestion_runtime(settings) as pipeline:
+            if entrypoint == "dm":
+                await handle_dm(message, settings, pipeline, client)
+            else:
+                interaction = SimpleNamespace(
+                    user=SimpleNamespace(id=42),
+                    locale="en-US",
+                    guild_id=None,
+                    response=SimpleNamespace(defer=defer),
+                    edit_original_response=edit_original_response,
+                )
+                await handle_menu(interaction, message, settings, pipeline, client)
+            records = await pipeline.state.recent_ingest_records(42)
+            assert (records[0].uploaded, records[0].skipped, records[0].errors) == (2, 1, 0)
+    assert downloads == ["/a.jpg", "/b.mp4"]
+    assert len(uploads) == 2
+    assert "Uploaded: 2, duplicates: 0, skipped: 1, errors: 0" in replies[0]
+    assert "note.txt" in replies[0]
+    assert list((tmp_path / "discord-downloads").iterdir()) == []
+
+
 async def test_dm_imports_all_attachments_and_reports_skipped(tmp_path, monkeypatch):
     uploads = []
 

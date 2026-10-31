@@ -69,7 +69,10 @@ async def _process_import(
     )
     download_dir = settings.data_dir / "discord-downloads"
     download_dir.mkdir(parents=True, exist_ok=True)
-    for index, attachment in enumerate(message.attachments, 1):
+    attachments = list(message.attachments)
+    for snapshot in getattr(message, "message_snapshots", []):
+        attachments.extend(snapshot.attachments)
+    for index, attachment in enumerate(attachments, 1):
         name = attachment.filename or str(attachment.id)
         progress["stage"] = f"{name}: download"
         if not (is_media(name) or is_archive(name)):
@@ -311,7 +314,7 @@ async def handle_status(interaction: Any, settings: Settings, pipeline: Ingestio
                 errors=record.errors,
             )
             entries.append(
-                f"#{record.id} | {record.created_at} UTC | {status} | "
+                f"#{record.id} | {record.format_created_at(settings.tz)} | {status} | "
                 f"{record.source_id}/{record.message_id}"
                 + (f"\n{record.progress}" if record.progress else "")
                 + (f"\n{counts}" if record.status not in ("waiting", "processing") else "")

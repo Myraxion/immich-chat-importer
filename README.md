@@ -189,7 +189,7 @@ All settings are read from `.env`. Platform-specific required values apply only 
 | `DISCORD_ALBUM_NAME_TEMPLATE` |  | *(empty)* | Dynamic album template. Falls back to `DISCORD_ALBUM_NAME`. |
 | `DISCORD_MAX_ATTACHMENT_MB` |  | `2000` | Input limit per Discord attachment in MiB. |
 | **Common and advanced settings** |  |  | |
-| `TZ` |  | `UTC` | Timezone for filename and album dates (e.g. `Asia/Shanghai`). |
+| `TZ` |  | `UTC` | Timezone for filename and album dates and `/status` timestamps (e.g. `Asia/Shanghai`). |
 | `DEFAULT_LANGUAGE` |  | `en` | Default fallback reply language (`en`, `zh`, `ja`, `ru`). |
 | `MAX_ARCHIVE_MB` |  | `2000` | Upper limit for incoming archives in MB. |
 | `MAX_ARCHIVE_FILES` |  | `1000` | Maximum media entries per archive; over-limit archives are rejected before upload. |
@@ -293,6 +293,7 @@ For an attachment `photo.jpg` sent by Alice on 2026-10-31, the filename would be
 
 ### Discord
 
+- **Forwarded messages**: Attachments in native Discord forwarded-message snapshots are supported in bot DMs and message menu imports. Naming uses the forwarding message's sender, time, and context.
 - **Attachment & archive limitations**: Supported formats include photos, videos, and archives (ZIP, RAR, 7z, tar variants, including ordinary subdirectories). Nested archives and non-media entries are skipped; password-protected or invalid archives fail. Individual attachment size is capped by `DISCORD_MAX_ATTACHMENT_MB`.
 - **Privacy & permissions**: The bot does not monitor arbitrary chats; it only handles direct DMs and explicitly triggered message menu imports. Menu replies are ephemeral (visible only to the caller).
 - **Status history**: Import history queried via `/status` is kept in memory and cleared upon restart. It will not resume unfinished jobs automatically.

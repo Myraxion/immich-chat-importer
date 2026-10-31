@@ -1,6 +1,7 @@
 from collections import deque
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
 
 
 def _timestamp() -> str:
@@ -21,6 +22,10 @@ class IngestRecord:
     errors: int = 0
     details: str = ""
     progress: str = ""
+
+    def format_created_at(self, tz: str) -> str:
+        created_at = datetime.fromisoformat(self.created_at).replace(tzinfo=UTC)
+        return f"{created_at.astimezone(ZoneInfo(tz)):%Y-%m-%d %H:%M:%S} {tz}"
 
 
 class State:
