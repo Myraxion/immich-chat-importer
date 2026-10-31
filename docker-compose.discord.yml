@@ -1,0 +1,10 @@
+services:
+  immich-telegram-bot:
+    image: ghcr.io/myraxion/immich-telegram-bot:latest
+    container_name: immich-telegram-bot
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TZ: ${TZ:-UTC}
+    volumes:
+      - ./data:/data

@@ -4,6 +4,8 @@
 
 [English](README.md) | 简体中文
 
+Discord 及双平台部署请参阅 [部署与验收指南](docs/discord-deployment.md)；下文保留默认的 Telegram 部署说明。
+
 [![Release](https://img.shields.io/github/v/release/myraxion/immich-telegram-bot?display_name=tag&sort=semver)](https://github.com/myraxion/immich-telegram-bot/releases)
 [![Docker image](https://img.shields.io/badge/ghcr.io-immich--telegram--bot-blue?logo=docker)](https://github.com/myraxion/immich-telegram-bot/pkgs/container/immich-telegram-bot)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-orange.svg)](LICENSE)

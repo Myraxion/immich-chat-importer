@@ -4,6 +4,8 @@
 
 English | [简体中文](README_zh.md)
 
+Discord and combined deployments: see [deployment and acceptance guide](docs/discord-deployment.md). The Telegram instructions below remain the default.
+
 [![Release](https://img.shields.io/github/v/release/myraxion/immich-telegram-bot?display_name=tag&sort=semver)](https://github.com/myraxion/immich-telegram-bot/releases)
 [![Docker image](https://img.shields.io/badge/ghcr.io-immich--telegram--bot-blue?logo=docker)](https://github.com/myraxion/immich-telegram-bot/pkgs/container/immich-telegram-bot)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-orange.svg)](LICENSE)

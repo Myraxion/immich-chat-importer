@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -8,6 +9,39 @@ from immich_tg_bot.config import Settings
 from immich_tg_bot.pipeline import IngestItem
 from immich_tg_bot.runtime import ingestion_runtime
 from immich_tg_bot.state import State
+
+
+async def test_combined_runtime_stops_both_adapters_together(tmp_path, monkeypatch):
+    from immich_tg_bot.__main__ import run
+
+    started = asyncio.Event()
+    stopped = asyncio.Event()
+    pipelines = []
+
+    async def telegram(settings, pipeline):
+        pipelines.append(pipeline)
+        await started.wait()
+
+    async def discord(settings, pipeline):
+        pipelines.append(pipeline)
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            stopped.set()
+
+    monkeypatch.setattr("immich_tg_bot.__main__.run_bot", telegram)
+    monkeypatch.setattr("immich_tg_bot.discord_bot.run_discord", discord)
+    settings = Settings.model_construct(
+        data_dir=tmp_path,
+        album_name=None,
+        immich_url="https://immich.test",
+        immich_api_key="key",
+        enabled_platforms=["telegram", "discord"],
+    )
+    await asyncio.wait_for(run(settings), timeout=2)
+    assert len(pipelines) == 2 and pipelines[0] is pipelines[1]
+    assert stopped.is_set()
 
 
 async def test_restart_interrupts_unfinished_records_without_changing_completed(tmp_path):
@@ -24,11 +58,14 @@ async def test_restart_interrupts_unfinished_records_without_changing_completed(
     async with ingestion_runtime(settings) as pipeline:
         records = await pipeline.state.recent_ingest_records(42)
         assert [(r.id, r.message_id, r.status) for r in records] == [
-            (running, "running", "interrupted"), (waiting, "waiting", "interrupted")
+            (running, "running", "interrupted"),
+            (waiting, "waiting", "interrupted"),
         ]
         completed = (await pipeline.state.recent_ingest_records(99))[0]
         assert (completed.status, completed.uploaded, completed.details) == (
-            "completed", 1, "saved"
+            "completed",
+            1,
+            "saved",
         )
 
     state = State(tmp_path / "state.sqlite")

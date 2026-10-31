@@ -32,15 +32,35 @@ async def test_concurrent_batches_reuse_identical_content(
         return {"id": "asset", "status": "created"}
 
     fake_immich.upload_asset.side_effect = upload
+    fake_immich.get_or_create_album.side_effect = lambda name: name
     pipeline = IngestionPipeline(fake_immich, state)
     now = datetime.now(UTC)
-    task1 = asyncio.create_task(pipeline.ingest([IngestItem(1, 1, first, first.name, now)]))
+    task1 = asyncio.create_task(
+        pipeline.ingest([IngestItem(1, 1, first, first.name, now, target_album="Telegram")])
+    )
     await asyncio.wait_for(entered.wait(), timeout=2)
-    task2 = asyncio.create_task(pipeline.ingest([IngestItem(1, 2, second, second.name, now)]))
+    task2 = asyncio.create_task(
+        pipeline.ingest(
+            [
+                IngestItem(
+                    1,
+                    2,
+                    second,
+                    second.name,
+                    now,
+                    target_album="Discord",
+                    platform="discord",
+                    attachment_id="attachment",
+                )
+            ]
+        )
+    )
     release.set()
     result1, result2 = await asyncio.gather(task1, task2)
     assert (result1.uploaded, result2.duplicates) == (1, 1)
     assert fake_immich.upload_asset.await_count == 1
+    fake_immich.add_to_album.assert_any_await("Telegram", ["asset"])
+    fake_immich.add_to_album.assert_any_await("Discord", ["asset"])
 
 
 async def test_repeat_source_routes_existing_asset_after_reopening_state(
