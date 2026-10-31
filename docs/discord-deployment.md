@@ -38,4 +38,4 @@ For upgrades, back up `./data` and retain it when replacing the image; it contai
 
 The user confirmed on 2026-10-31 that the real-account acceptance for issue #9 is complete. The earlier progress record includes confirmed personal-channel imports, a server message-menu import, a bot DM archive, and a successful #8 test-image check. The full acceptance matrix has been confirmed complete; per-scenario environment details were not captured in this repository. Automated regression on the implementation commit passed 162 tests. Keep real-account results distinct from simulated integration tests when adding further evidence.
 
-# 用户于 2026-10-31 确认 #9 要求的真实账号实机验收已完成。此前记录的具体场景包括个人频道导入、服务器消息菜单导入、bot 私信压缩包导入及 #8 测试镜像验证。完整验收矩阵已由用户确认完成；逐场景的环境细节未记录在本仓库。实现提交的自动化回归 162 项通过。后续补充证据时，继续区分真实账号实测与模拟集成测试。
+用户于 2026-10-31 确认 #9 要求的真实账号实机验收已完成。此前记录的具体场景包括个人频道导入、服务器消息菜单导入、bot 私信压缩包导入及 #8 测试镜像验证。完整验收矩阵已由用户确认完成；逐场景的环境细节未记录在本仓库。实现提交的自动化回归 162 项通过。后续补充证据时，继续区分真实账号实测与模拟集成测试。

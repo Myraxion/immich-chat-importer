@@ -1,54 +1,49 @@
 # immich-telegram-bot
 
-> Self-hosted Telegram bot that uploads photos, videos and archives forwarded to it straight into your [Immich](https://immich.app) library.
+> Self-hosted bot that imports media from Telegram and Discord into your [Immich](https://immich.app) library.
 
 English | [简体中文](README_zh.md)
 
-Discord and combined deployments: see [deployment and acceptance guide](docs/discord-deployment.md). The Telegram instructions below remain the default.
+Run Telegram, Discord, or both in one process. See the [Discord and combined deployment guide](docs/discord-deployment.md) for Discord setup and operation.
 
 [![Release](https://img.shields.io/github/v/release/myraxion/immich-telegram-bot?display_name=tag&sort=semver)](https://github.com/myraxion/immich-telegram-bot/releases)
 [![Docker image](https://img.shields.io/badge/ghcr.io-immich--telegram--bot-blue?logo=docker)](https://github.com/myraxion/immich-telegram-bot/pkgs/container/immich-telegram-bot)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-orange.svg)](LICENSE)
 [![CI](https://github.com/myraxion/immich-telegram-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/myraxion/immich-telegram-bot/actions/workflows/ci.yml)
 
-Someone shares a photo with you over Telegram and you want it in your photo library? Forward it to this bot — it will upload it for you, deduplicate, and (optionally) put it into a dedicated album.
+Forward media to the Telegram bot, send attachments to the Discord bot in a DM, or use Discord’s **Apps → Save to Immich** message command. Imports share one Immich account, exact-content deduplication, and album routing.
 
 ## Features
 
-- 📸 **Photos** (compressed and as documents), 🎥 **videos**, **animations**, **voice / audio / video notes**, and **arbitrary documents**.
-- 📦 **Archives**: `zip`, `rar`, `7z`, `tar`, `tar.gz`, `tar.bz2`, `tar.xz` — unpacked server-side, media files extracted recursively.
-- 🖼️ **Media groups** (albums up to 10 files) — processed together so they land in Immich as a coherent group.
-- 🔁 **Deduplication** via SHA-1: forwarding the same file twice is safe and free.
-- 📅 **EXIF-aware timestamps**: original capture date is preserved when present (otherwise falls back to the Telegram message date).
-- 🔒 **Whitelist auth**: only allowed Telegram user IDs can talk to the bot.
-- 🌐 **Multi-language support**: automatic replies matching sender's Telegram language (English, Chinese, Japanese, Russian) with configurable fallback.
-- 📂 **Optional album**: every uploaded asset goes into the album you name.
-- 🚀 **Large files up to 2 GB** via a bundled [local Bot API server](https://github.com/tdlib/telegram-bot-api) — the stock cloud API caps downloads at 20 MB.
-- 🐳 **Two-container Compose stack**, multi-arch image (`linux/amd64`, `linux/arm64`).
+- **Telegram**: import photos, videos, animations, audio, documents, media groups, and supported archives. The bundled local Bot API server supports large downloads.
+- **Discord**: import supported photo, video, and archive attachments from bot DMs or a user-installed message command. Menu replies are private; `/status` shows your five latest imports.
+- **Archives**: ZIP, RAR, 7z, and tar variants are unpacked server-side. Media in ordinary subdirectories is included; nested archives are not expanded. Archives exceeding the configured media count are rejected before their entries are uploaded.
+- **Shared ingestion**: reuse identical content across platforms, add assets to the target album, and retain successful imports when another item fails. Failed album associations can be retried.
+- **Naming and dates**: configure filenames and albums separately for each platform; photo timestamps use EXIF when available and otherwise the source message time.
+- **Access and language**: separate platform user-ID whitelists and replies in English, Chinese, Japanese, or Russian, with a configurable fallback.
+- **Deployment**: Telegram only, Discord only, or both; multi-architecture images support `linux/amd64` and `linux/arm64`.
 
 ## How it works
 
-```
-   Telegram client                Telegram cloud
-        │                                │
-        │  (forward / send media)        │
-        ▼                                │
- ┌────────────────────┐    long-polling  │
- │ local Bot API      │ ◄────────────────┘
- │ (tdlib container)  │  ── writes file to a shared volume
- └─────────┬──────────┘
-           │ file appears at /var/lib/telegram-bot-api/...
-           ▼
- ┌─────────────────────────────┐   POST /api/assets  ┌──────────────┐
- │ immich-telegram-bot         │ ──────────────────► │ Immich server│
- │   • whitelist auth          │   sha1 dedup        │              │
- │   • exif date extraction    │   optional album    │              │
- │   • archive unpacking       │                     └──────────────┘
- │   • sqlite state            │
- └─────────────────────────────┘
+```text
+Telegram → local Bot API ─┐
+                          ├→ shared ingestion + SQLite state → Immich
+Discord → Gateway ────────┘
 ```
 
-## Quick start
+Enabled adapters run in one process and serialize imports. Discord status queries remain responsive during an import. Discord-only deployments do not need the Telegram Bot API service or Telegram credentials.
+
+## Choose a deployment
+
+| Mode | `ENABLED_PLATFORMS` | Compose command |
+| --- | --- | --- |
+| Telegram only (default) | `telegram` | `docker compose up -d` |
+| Discord only | `discord` | `docker compose -f docker-compose.discord.yml up -d` |
+| Both | `telegram,discord` | `docker compose up -d` |
+
+The quick start and configuration table below describe the default Telegram deployment. For Discord or both platforms, use the [deployment guide](docs/discord-deployment.md), including its application installation and configuration steps. Download the appropriate Compose file and `.env.example` before starting.
+
+## Telegram quick start
 
 You need a working Immich instance and Docker installed.
 
@@ -66,7 +61,7 @@ docker compose up -d
 
 That's it. Send `/start` to your bot in Telegram, then forward a photo.
 
-## Detailed setup
+## Telegram detailed setup
 
 ### 1. Create a Telegram bot
 
@@ -128,9 +123,9 @@ INFO immich_tg_bot.bot: Bot starting (allowed users: [...], album: Telegram Inbo
 
 Send `/start` to your bot. Forward a photo. Watch it appear in Immich within a few seconds.
 
-## Configuration
+## Telegram configuration
 
-All settings are read from `.env`.
+All settings are read from `.env`. Telegram-specific required values apply only when Telegram is enabled; see the [deployment guide](docs/discord-deployment.md) for Discord settings.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
@@ -156,7 +151,7 @@ All settings are read from `.env`.
 
 The bottom three rarely need to change — they match the default `docker-compose.yml`.
 
-## Limits & gotchas
+## Telegram limits & gotchas
 
 - **Telegram caps single files at 2 GB** even with the local Bot API server. Files larger than that need MTProto (userbot) and are out of scope here.
 - **Photos sent as Picture lose EXIF and are recompressed by Telegram.** The bot still uploads them, but timestamps will use the message date and not the original capture date. Send as **Document/File** to preserve everything.
@@ -204,47 +199,3 @@ Releases are cut by pushing a `vX.Y.Z` tag — that triggers a multi-arch build 
 ## License
 
 [AGPL-3.0-only](LICENSE) — same family as Immich itself. If you run a modified version as a network service, you must offer your changes back under the same license.
-# Discord DM import
-
-To run Discord alone, install the project and set `ENABLED_PLATFORMS=discord`,
-`DISCORD_TOKEN`, `DISCORD_ALLOWED_USER_IDS`, `IMMICH_URL` and `IMMICH_API_KEY`.
-Set `DISCORD_ALBUM_NAME` to change the default `Discord Inbox` album and
-`DISCORD_MAX_ATTACHMENT_MB` to change the per-file limit (default 2000 MiB).
-The existing `DEFAULT_LANGUAGE`, `DATA_DIR`, and `CLEANUP_LOCAL_FILES` settings apply.
-Telegram credentials and the local Telegram Bot API server are unnecessary in this mode.
-
-Create a Discord bot, install it to an account or server where you can DM it, and
-run `immich-telegram-bot`. Send a photo and a video as attachments in a direct
-message from a whitelisted account. The reply reports the outcome; check the
-Discord Inbox album in Immich for the imported media. Supported archives can also
-be sent as attachments. Non-media and nested archives are skipped. The attachment
-size and media count limits do not limit total extracted bytes.
-
-Set `DISCORD_FILENAME_TEMPLATE` (default `{original_name}`) and
-`DISCORD_ALBUM_NAME_TEMPLATE` (default empty, falling back to `DISCORD_ALBUM_NAME`)
-to use the same naming variables and `TZ` as Telegram. For a server message,
-`{source}` is the server and channel names, each falling back to its ID. In
-private conversations it is the original author's display name or username.
-`{sender}` is always the original author. Archive entries retain their filenames.
-
-### Personal installation acceptance checklist
-
-These checks require real Discord accounts and have not yet been performed:
-
-1. In the Developer Portal enable user installation and the `applications.commands`
-   scope; install the application to a whitelisted account. Start the bot and allow
-   global commands to synchronize.
-2. In a server the bot has not joined, use Apps → Save to Immich on another
-   author's photo/video message. Confirm every supported attachment arrives, the
-   source and sender templates identify the original message, and only the caller
-   sees the result. Repeat where external apps cannot post public responses.
-3. Repeat in the bot DM, another person's DM, and a group DM. Check that the
-   private result appears only to the caller, and that saving a bot DM already
-   imported automatically does not upload a second copy.
-4. Repeat with a non-whitelisted caller, missing server/channel names, Chinese
-   locale, and configured filename/album templates. Confirm denial happens before
-   download, ID fallbacks work, and the result is localized.
-
-Results after the interaction response window and restart interruption handling
-are planned for the long-running task issue.
-

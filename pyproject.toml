@@ -1,13 +1,13 @@
 [project]
 name = "immich-telegram-bot"
 version = "0.1.5"
-description = "Telegram bot that uploads forwarded photos, videos and archives to an Immich instance."
+description = "Self-hosted bot that imports media from Telegram and Discord into Immich."
 readme = "README.md"
 
 requires-python = ">=3.12"
 license = { text = "AGPL-3.0-only" }
 authors = [{ name = "myraxion" }]
-keywords = ["immich", "telegram", "bot", "self-hosted", "photos"]
+keywords = ["immich", "telegram", "discord", "bot", "self-hosted", "photos"]
 classifiers = [
     "Programming Language :: Python :: 3.12",
     "License :: OSI Approved :: GNU Affero General Public License v3",
