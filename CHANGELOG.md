@@ -7,12 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
+## [0.2.0] - 2026-10-31
 
-- 图片上传附带包含拍摄日期和 `TZ` 时区偏移的 XMP sidecar，原图字节保持不变；无时区 EXIF 使用 `TZ`，已有偏移保留实际时间点。已存在的重复资产不会自动更新日期。
+### 🚀 Breaking Changes & Migration
+- **Telegram 配置变量统一加前缀**：为支持多平台并存，所有 Telegram 专属环境变量添加 `TELEGRAM_` 前缀（`ALLOWED_USER_IDS` → `TELEGRAM_ALLOWED_USER_IDS`、`ALBUM_NAME` → `TELEGRAM_ALBUM_NAME`、`ALBUM_NAME_TEMPLATE` → `TELEGRAM_ALBUM_NAME_TEMPLATE`、`MEDIA_NAME_TEMPLATE` → `TELEGRAM_MEDIA_NAME_TEMPLATE`、`DOCUMENT_NAME_TEMPLATE` → `TELEGRAM_DOCUMENT_NAME_TEMPLATE`）。已有部署升级时必须更新 `.env`。
+- **新增部署模式配置 (`ENABLED_PLATFORMS`)**：支持 `telegram`、`discord` 或 `telegram,discord`（双平台联合部署），默认值为 `telegram`。
+- **移除本地 SQLite 状态库**：去重逻辑全面委托给 Immich 服务端校验（`x-immich-checksum`），废弃本地 `bot_state.db`，服务完全实现轻量无状态化。
+- **项目与镜像更名**：项目正式重命名为 `immich-chat-importer`（原 `immich-telegram-bot`），镜像名迁移至 `ghcr.io/myraxion/immich-chat-importer`。
+
+### Added
+- **Discord 平台全面支持**：
+  - 支持向机器人私信（DM）直接发送图片、视频和压缩包进行导入。
+  - 支持右键消息 **Apps → 保存到 Immich** (Save to Immich) 快捷导入消息附件。
+  - 支持通过 `/status` 查询当前进程生命周期内的最近 5 次导入状态与摘要。
+  - 支持 Discord 专属动态命名模板 (`DISCORD_FILENAME_TEMPLATE`) 与相册模板 (`DISCORD_ALBUM_NAME_TEMPLATE`)。
+  - 支持独立用户白名单配置 (`DISCORD_ALLOWED_USER_IDS`) 与单附件大小上限 (`DISCORD_MAX_ATTACHMENT_MB`)。
+- **共享导入核心 (Shared Ingestion Pipeline)**：
+  - 抽象通用的 `IngestionPipeline`、`IngestBatch` 与 `IngestRecord` 领域模型，跨平台解耦消息协议与导入管线。
+  - 支持单进程同时挂载运行 Telegram 与 Discord 机器人，共享导入资源与 Immich 会话。
+- **服务端去重与相册关联对齐 (ADR 0006)**：
+  - 依赖 Immich 服务端校验识别重复资产，跨平台导入完全去重且不占额外存储。
+  - 重复资产导入时自动对齐并关联到当前指定的目标相册。
+- **动态命名与时区支持**：
+  - 全面支持 `{source}`, `{source_id}`, `{sender}`, `{date}`, `{exif_date}` 等动态模板变量。
+  - 引入 `TZ` 环境变量（默认 `UTC`），所有日期命名与 `/status` 查询均以本地时区呈现。
+  - 模板解析容错：未知变量时输出告警并优雅回退到默认命名。
+- **压缩包安全限制与配额**：
+  - 新增 `MAX_ARCHIVE_MB`（最大解压体积，默认 2000MB）与 `MAX_ARCHIVE_FILES`（最大媒体文件数，默认 1000）。
+  - 支持检测加密压缩包并返回友好错误提示。
+- **网络抖动重试与相册幂等 (ADR 0007)**：
+  - 对来源拉取、Immich 上传、相册查找与关联增加有界自动重试。
+  - 相册创建超时时通过二次查找进行结果对齐，避免重复创建同名相册。
+
+### Fixed
+- 图片上传附带包含拍摄日期和 `TZ` 时区偏移的 XMP sidecar，原图字节保持不变；无时区 EXIF 使用 `TZ`，已有偏移保留实际时间点。
 - Discord 转发图片的 `{source}` 使用原频道名称，无权限查询时使用频道 ID。
 - Telegram 和 Discord 的 `/status` 按 `TZ` 配置显示时间和时区，修复始终显示 UTC 的问题。
 - Discord 私信和消息菜单支持导入原生转发消息快照中的附件，修复转发图片时结果全部为 0 的问题。
+- 修复因文件系统遍历顺序不同导致归档测试与文件导入顺序不稳定的问题。
+- 修复超长错误信息回复被平台拦截截断的问题。
+- 修复重建相册时的资产归属异常。
 
 ## [0.1.5] - 2026-10-21
 
