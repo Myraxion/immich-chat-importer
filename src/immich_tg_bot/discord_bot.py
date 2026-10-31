@@ -1,6 +1,8 @@
 import logging
 import mimetypes
 import tempfile
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -11,12 +13,13 @@ import httpx
 from discord import app_commands
 
 from .archives import is_archive, is_media
+from .batches import IngestBatches, IngestRequest, Preparation
 from .config import Settings
-from .errors import failure_kind, format_failure, format_progress
+from .errors import failure_kind, format_failure
 from .i18n import resolve_language, t
 from .naming import MessageMetadata, resolve_album_name, resolve_filename, split_filename
-from .pipeline import IngestionPipeline, IngestItem, IngestSummary, _exif_datetime
-from .retry import retry, retry_notice
+from .pipeline import IngestionPipeline, IngestItem, _exif_datetime
+from .retry import retry
 from .runtime import ingestion_runtime
 
 log = logging.getLogger(__name__)
@@ -40,22 +43,19 @@ async def _forward_source(message: Any, settings: Settings, client: httpx.AsyncC
     return str(channel_id)
 
 
-async def _process_import(
+@asynccontextmanager
+async def _prepare_import(
     message: Any,
-    operator_id: int,
     settings: Settings,
-    pipeline: IngestionPipeline,
     client: httpx.AsyncClient,
     interaction: Any,
-    record_id: int,
-    progress: dict[str, Any],
-) -> tuple[str, IngestSummary, list[str], list[str]]:
-    """Process a Discord message on behalf of an authorized operator."""
+    batch: Preparation,
+) -> AsyncIterator[None]:
     locale = getattr(interaction, "locale", None) if interaction else None
     lang = resolve_language(str(locale) if locale else None, settings.default_language)
-    items: list[IngestItem] = []
-    errors: list[str] = progress["errors"]
-    skipped: list[str] = progress["skipped"]
+    items = batch.items
+    errors = batch.errors
+    skipped = batch.skipped
     limit = settings.discord_max_attachment_mb * 1024 * 1024
     author = message.author
     sender = (
@@ -94,7 +94,7 @@ async def _process_import(
         attachments.extend(snapshot.attachments)
     for index, attachment in enumerate(attachments, 1):
         name = attachment.filename or str(attachment.id)
-        progress["stage"] = f"{name}: download"
+        batch.stage = f"{name}: download"
         if not (is_media(name) or is_archive(name)):
             skipped.append(name)
             continue
@@ -187,39 +187,15 @@ async def _process_import(
             )
             errors.append(f"{safe} ({reason})" if isinstance(exc, ValueError) else safe)
     try:
-        summary = progress["summary"]
-        if items:
-            progress["stage"] = "ingestion"
-            await pipeline.state.wait_ingest_record(record_id)
-            summary = await pipeline.ingest(items, record_id=record_id, summary=summary)
+        yield
     finally:
         if settings.cleanup_local_files:
             for item in items:
                 try:
                     item.local_path.unlink(missing_ok=True)
                 except OSError:
-                    progress["stage"] = f"{item.original_file_name}: cleanup"
+                    batch.stage = f"{item.original_file_name}: cleanup"
                     raise
-    summary_errors = (
-        [
-            format_failure(name, stage, kind, lang, settings.default_language)
-            for name, stage, kind in summary.error_details
-        ]
-        if len(summary.error_details) == len(summary.error_messages)
-        else summary.error_messages
-    )
-    errors = [*errors, *summary_errors]
-    skipped = [*skipped, *summary.skipped_messages]
-    counts = t(
-        "discord_counts",
-        lang_code=lang,
-        uploaded=summary.uploaded,
-        duplicates=summary.duplicates,
-        skipped=len(skipped),
-        errors=summary.errors + len(errors) - len(summary_errors),
-    )
-    details = [*(f"{name}: {t('discord_skipped', lang_code=lang)}" for name in skipped), *errors]
-    return "\n".join([counts, *details]), summary, skipped, errors
 
 
 async def process_import(
@@ -232,84 +208,35 @@ async def process_import(
 ) -> str | None:
     if operator_id not in settings.discord_allowed_user_ids:
         return None
-    state = pipeline.state
-    record_id = await state.create_ingest_record(
-        operator_id, str(message.channel.id), str(message.id)
+    locale = getattr(interaction, "locale", None) if interaction else None
+    lang = resolve_language(str(locale) if locale else None, settings.default_language)
+    result = await IngestBatches(pipeline).run(
+        IngestRequest(
+            "discord",
+            operator_id,
+            str(message.channel.id),
+            str(message.id),
+            str(locale) if locale else None,
+            settings.default_language,
+        ),
+        lambda batch: _prepare_import(message, settings, client, interaction, batch),
     )
-    progress: dict[str, Any] = {
-        "summary": IngestSummary(),
-        "errors": [],
-        "skipped": [],
-        "stage": "preparation",
-    }
-
-    async def notice(stage: str, attempt: int, delay: float) -> None:
-        locale = getattr(interaction, "locale", None) if interaction else None
-        await state.set_ingest_progress(
-            record_id,
-            format_progress(
-                stage, attempt, delay, str(locale) if locale else None, settings.default_language
-            ),
-        )
-
-    token = retry_notice.set(notice)
-    try:
-        await state.start_ingest_record(record_id)
-        result, summary, skipped, errors = await _process_import(
-            message, operator_id, settings, pipeline, client, interaction, record_id, progress
-        )
-        error_count = summary.errors + len(errors) - len(summary.error_messages)
-        status = (
-            "partial"
-            if error_count and (summary.uploaded or summary.duplicates)
-            else ("failed" if error_count else "completed")
-        )
-        await state.finish_ingest_record(
-            record_id,
-            status,
-            summary.uploaded,
-            summary.duplicates,
-            len(skipped),
-            error_count,
-            "\n".join([*(f"{name}: skipped" for name in skipped), *errors]),
-        )
-        return result
-    except Exception as exc:
-        log.exception("Discord import failed")
-        summary = progress["summary"]
-        locale = getattr(interaction, "locale", None) if interaction else None
-        lang = str(locale) if locale else None
-        errors = progress["errors"] + [
-            format_failure(name, stage, kind, lang, settings.default_language)
-            for name, stage, kind in summary.error_details
+    record = result.record
+    counts = t(
+        "discord_counts",
+        lang_code=lang,
+        uploaded=record.uploaded,
+        duplicates=record.duplicates,
+        skipped=record.skipped,
+        errors=record.errors,
+    )
+    details = result.errors
+    if result.fatal_detail is None:
+        details = [
+            *(f"{name}: {t('discord_skipped', lang_code=lang)}" for name in result.skipped),
+            *details,
         ]
-        errors.append(
-            format_failure(
-                "Import", progress["stage"], failure_kind(exc), lang, settings.default_language
-            )
-        )
-        skipped = progress["skipped"] + summary.skipped_messages
-        await state.finish_ingest_record(
-            record_id,
-            "partial" if summary.uploaded or summary.duplicates else "failed",
-            summary.uploaded,
-            summary.duplicates,
-            len(skipped),
-            summary.errors + len(progress["errors"]) + 1,
-            "\n".join(errors),
-        )
-        counts = t(
-            "discord_counts",
-            lang_code=lang,
-            default_lang=settings.default_language,
-            uploaded=summary.uploaded,
-            duplicates=summary.duplicates,
-            skipped=len(skipped),
-            errors=summary.errors + len(progress["errors"]) + 1,
-        )
-        return "\n".join([counts, *errors])
-    finally:
-        retry_notice.reset(token)
+    return "\n".join([counts, *details])
 
 
 async def handle_status(interaction: Any, settings: Settings, pipeline: IngestionPipeline) -> None:
@@ -319,7 +246,7 @@ async def handle_status(interaction: Any, settings: Settings, pipeline: Ingestio
     if interaction.user.id not in settings.discord_allowed_user_ids:
         content = t("discord_unauthorized", lang_code=lang)
     else:
-        records = await pipeline.state.recent_ingest_records(interaction.user.id)
+        records = await IngestBatches(pipeline).recent("discord", interaction.user.id)
         entries = []
         for record in records:
             status = t(

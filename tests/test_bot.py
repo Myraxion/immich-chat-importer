@@ -28,7 +28,14 @@ async def test_telegram_status_only_shows_callers_telegram_records():
         from_user=SimpleNamespace(id=42, language_code="en"),
         reply=reply,
     )
-    await handle_telegram_status(message, state, "en")
+    from unittest.mock import AsyncMock
+
+    from immich_tg_bot.batches import IngestBatches
+    from immich_tg_bot.pipeline import IngestionPipeline
+
+    await handle_telegram_status(
+        message, IngestBatches(IngestionPipeline(AsyncMock(), state)), "en"
+    )
     assert len(replies) == 1
     assert f"#{record_id}" in replies[0]
     assert f"#{discord_id}" not in replies[0]
@@ -368,3 +375,64 @@ async def test_extract_ingest_item_preserves_document_extension(
     assert item is not None
     assert item.file_name == expected
     assert item.original_file_name == original_name
+
+
+async def test_telegram_media_import_records_result_before_reply(tmp_path, monkeypatch):
+    from datetime import UTC, datetime
+    from unittest.mock import AsyncMock
+
+    from aiogram import Bot, Dispatcher
+    from aiogram.types import File, Message
+
+    from immich_tg_bot.batches import IngestBatches
+    from immich_tg_bot.bot import run_bot
+    from immich_tg_bot.config import Settings
+    from immich_tg_bot.pipeline import IngestionPipeline
+    from immich_tg_bot.state import State
+
+    photo = tmp_path / "photo.jpg"
+    photo.write_bytes(b"image")
+    monkeypatch.setattr(
+        Bot,
+        "get_file",
+        AsyncMock(return_value=File(file_id="file", file_unique_id="unique", file_path=str(photo))),
+    )
+    immich = AsyncMock()
+    immich.upload_asset.return_value = {"id": "asset", "status": "created"}
+    pipeline = IngestionPipeline(immich, State())
+    batches = IngestBatches(pipeline)
+    replies = []
+
+    async def reply(message, text, **kwargs):
+        record = (await batches.recent("telegram", 42))[0]
+        assert record.status == "completed"
+        assert record.uploaded == 1
+        replies.append(text)
+        raise RuntimeError("reply delivery failed")
+
+    monkeypatch.setattr(Message, "reply", reply)
+    message = Message.model_validate(
+        {
+            "message_id": 1,
+            "date": datetime.now(UTC),
+            "chat": {"id": 42, "type": "private"},
+            "from": {"id": 42, "is_bot": False, "first_name": "Alice"},
+            "document": {"file_id": "file", "file_unique_id": "unique", "file_name": "photo.jpg"},
+        }
+    )
+
+    async def poll(dispatcher, bot, **kwargs):
+        handler = next(h for h in dispatcher.message.handlers if h.callback.__name__ == "on_media")
+        await handler.callback(message)
+
+    monkeypatch.setattr(Dispatcher, "start_polling", poll)
+    settings = Settings.model_construct(
+        immich_url="https://immich.test",
+        telegram_bot_token="123456:test-token",
+        telegram_allowed_user_ids=[42],
+        telegram_files_dir=tmp_path,
+        data_dir=tmp_path,
+    )
+    await run_bot(settings, pipeline)
+    assert len(replies) == 1
+    assert (await batches.recent("telegram", 42))[0].errors == 0
