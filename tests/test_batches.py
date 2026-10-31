@@ -1,6 +1,8 @@
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock
 
+import pytest
+
 from immich_chat_importer.batches import IngestBatches, IngestRequest
 from immich_chat_importer.pipeline import IngestionPipeline
 from immich_chat_importer.state import State
@@ -114,3 +116,58 @@ async def test_preparation_continues_while_another_batch_uploads(tmp_path):
         if second is not None:
             await second
     assert [r.status for r in await batches.recent("discord", 42)] == ["completed", "completed"]
+
+
+@pytest.mark.parametrize("platform", ["telegram", "discord", "future"])
+async def test_partial_batch_retains_errors_and_skips_after_cleanup_failure(tmp_path, platform):
+    from datetime import UTC, datetime
+
+    from immich_chat_importer.pipeline import IngestItem
+
+    immich = AsyncMock()
+    immich.upload_asset.side_effect = [
+        OSError("upload failed"),
+        {"id": "asset", "status": "created"},
+    ]
+    batches = IngestBatches(IngestionPipeline(immich, State()))
+    photo = tmp_path / "photo.jpg"
+    photo.write_bytes(b"image")
+
+    failed_photo = tmp_path / "failed.jpg"
+    failed_photo.write_bytes(b"failed image")
+
+    @asynccontextmanager
+    async def prepare(batch):
+        batch.items.append(IngestItem(1, 1, failed_photo, failed_photo.name, datetime.now(UTC)))
+        batch.items.append(IngestItem(1, 2, photo, photo.name, datetime.now(UTC)))
+        batch.errors.append("another attachment failed")
+        batch.skipped.append("notes.txt")
+        try:
+            yield
+        finally:
+            batch.stage = "cleanup"
+            raise OSError("cleanup failed")
+
+    result = await batches.run(IngestRequest(platform, 42, "chat", "message"), prepare)
+    assert (result.record.status, result.record.uploaded, result.record.errors) == ("partial", 1, 3)
+    assert result.fatal_detail and "cleanup" in result.fatal_detail
+    assert "another attachment failed" in result.record.details
+    assert "failed.jpg" in result.record.details
+    assert "notes.txt" in result.record.details
+    assert (await batches.recent(platform, 42))[0].details == result.record.details
+
+
+@pytest.mark.parametrize("platform", ["telegram", "discord", "future"])
+async def test_empty_batch_completes_without_errors(platform):
+    batches = IngestBatches(IngestionPipeline(AsyncMock(), State()))
+
+    @asynccontextmanager
+    async def prepare(batch):
+        yield
+
+    result = await batches.run(IngestRequest(platform, 42, "chat", "message"), prepare)
+    assert (result.record.status, result.record.errors, result.record.uploaded) == (
+        "completed",
+        0,
+        0,
+    )

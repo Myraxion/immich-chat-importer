@@ -1,12 +1,4 @@
 import httpx
-from aiogram.exceptions import (
-    TelegramEntityTooLarge,
-    TelegramForbiddenError,
-    TelegramNetworkError,
-    TelegramRetryAfter,
-    TelegramServerError,
-    TelegramUnauthorizedError,
-)
 
 from .i18n import t
 
@@ -14,12 +6,6 @@ from .i18n import t
 def failure_kind(exc: Exception, stage: str = "") -> str:
     if stage == "extract":
         return "failure_archive"
-    if isinstance(exc, TelegramEntityTooLarge):
-        return "failure_size"
-    if isinstance(exc, (TelegramUnauthorizedError, TelegramForbiddenError)):
-        return "failure_access"
-    if isinstance(exc, (TelegramNetworkError, TelegramServerError, TelegramRetryAfter)):
-        return "failure_network"
     if isinstance(exc, httpx.HTTPStatusError):
         if exc.response.status_code in (401, 403):
             return "failure_access"
@@ -54,7 +40,6 @@ def format_progress(stage: str, attempt: int, delay: float, lang: str | None, de
         "extract": "stage_extract",
         "album lookup": "stage_album_lookup",
         "album association": "stage_album_association",
-        "Telegram file retrieval": "discord_download",
     }.get(name)
     label = t(key, lang_code=lang, default_lang=default) if key else name
     description = f"{label}: {target}" if target else label

@@ -5,12 +5,6 @@ from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 
 import httpx
-from aiogram.exceptions import (
-    TelegramEntityTooLarge,
-    TelegramNetworkError,
-    TelegramRetryAfter,
-    TelegramServerError,
-)
 
 RetryNotice = Callable[[str, int, float], Awaitable[None]]
 retry_notice: ContextVar[RetryNotice | None] = ContextVar("retry_notice", default=None)
@@ -18,13 +12,7 @@ retry_notice: ContextVar[RetryNotice | None] = ContextVar("retry_notice", defaul
 
 def _delay(exc: Exception, attempt: int) -> float | None:
     delay = (2.0, 5.0)[attempt - 1]
-    if isinstance(exc, TelegramEntityTooLarge):
-        return None
-    if isinstance(exc, TelegramRetryAfter):
-        return max(delay, float(exc.retry_after)) if exc.retry_after <= 30 else None
-    if isinstance(
-        exc, (TelegramNetworkError, TelegramServerError, httpx.TimeoutException, httpx.NetworkError)
-    ):
+    if isinstance(exc, (httpx.TimeoutException, httpx.NetworkError)):
         return delay
     if isinstance(exc, httpx.HTTPStatusError):
         code = exc.response.status_code
@@ -45,7 +33,12 @@ def _delay(exc: Exception, attempt: int) -> float | None:
     return None
 
 
-async def retry[T](operation: Callable[[], Awaitable[T]], stage: str) -> T:
+async def retry[T](
+    operation: Callable[[], Awaitable[T]],
+    stage: str,
+    *,
+    delay_for: Callable[[Exception, int], float | None] = _delay,
+) -> T:
     for attempt in range(1, 4):
         notice = retry_notice.get()
         if notice:
@@ -53,7 +46,7 @@ async def retry[T](operation: Callable[[], Awaitable[T]], stage: str) -> T:
         try:
             return await operation()
         except Exception as exc:
-            delay = _delay(exc, attempt) if attempt < 3 else None
+            delay = delay_for(exc, attempt) if attempt < 3 else None
             if delay is None:
                 raise
             if notice:

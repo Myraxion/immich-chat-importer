@@ -2,7 +2,7 @@ import asyncio
 import html
 import logging
 import mimetypes
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager, suppress
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -19,7 +19,7 @@ from aiogram.types import Message, TelegramObject
 
 from ...batches import IngestBatches, IngestRequest, Preparation
 from ...config import Settings
-from ...errors import failure_kind, format_failure
+from ...errors import format_failure
 from ...i18n import resolve_language, t
 from ...media_metadata import inspect_media
 from ...naming import (
@@ -31,6 +31,7 @@ from ...naming import (
 from ...pipeline import IngestionPipeline, IngestItem, IngestSummary
 from ...retry import retry
 from ...runtime import ingestion_runtime
+from .errors import failure_kind, retry_delay
 from .metadata import extract_metadata
 
 log = logging.getLogger(__name__)
@@ -162,7 +163,7 @@ def _media_info_for(message: Message) -> tuple[str | None, str, str, str]:
 
 async def _resolve_local_path(bot: Bot, file_id: str, telegram_files_dir: Path) -> Path:
     """Locate a file exposed by the local Bot API through the shared volume."""
-    tg_file = await retry(lambda: bot.get_file(file_id), "Telegram file retrieval")
+    tg_file = await retry(lambda: bot.get_file(file_id), "download", delay_for=retry_delay)
     if tg_file.file_path is None:
         raise FileNotFoundError("Telegram returned no file_path")
     fp = Path(tg_file.file_path)
@@ -259,9 +260,10 @@ def format_summary_replies(
     errors: int | None = None,
     lang_code: str | None = None,
     default_lang: str = "en",
+    skipped: Sequence[str] = (),
 ) -> list[str]:
     replies = [_format_summary_counts(summary, errors, lang_code, default_lang)]
-    if summary.error_messages:
+    if summary.error_messages or skipped:
         language = resolve_language(lang_code, default_lang=default_lang)
         error_lines = (
             [
@@ -271,7 +273,11 @@ def format_summary_replies(
             if len(summary.error_details) == len(summary.error_messages)
             else summary.error_messages
         )
-        for message in error_lines:
+        lines = [
+            *error_lines,
+            *(f"{name}: {t('discord_skipped', lang_code=language)}" for name in skipped),
+        ]
+        for message in lines:
             for stage, key in (
                 ("album lookup/create", "stage_album_lookup"),
                 ("album association", "stage_album_association"),
@@ -403,16 +409,15 @@ async def run_bot(settings: Settings, pipeline: IngestionPipeline | None = None)
             prepare,
         )
         try:
-            if result.fatal_detail:
-                await head.reply(html.escape(result.fatal_detail))
-            else:
-                for reply_text in format_summary_replies(
-                    result.summary,
-                    errors=result.record.errors,
-                    lang_code=head_lang,
-                    default_lang=settings.default_language,
-                ):
-                    await head.reply(reply_text)
+            summary = replace(result.summary, error_messages=result.errors, error_details=[])
+            for reply_text in format_summary_replies(
+                summary,
+                errors=result.record.errors,
+                lang_code=head_lang,
+                default_lang=settings.default_language,
+                skipped=result.skipped,
+            ):
+                await head.reply(reply_text)
         except Exception:
             log.exception("Telegram reply failed")
 

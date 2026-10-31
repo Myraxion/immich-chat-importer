@@ -240,12 +240,10 @@ async def process_import(
         skipped=record.skipped,
         errors=record.errors,
     )
-    details = result.errors
-    if result.fatal_detail is None:
-        details = [
-            *(f"{name}: {t('discord_skipped', lang_code=lang)}" for name in result.skipped),
-            *details,
-        ]
+    details = [
+        *(f"{name}: {t('discord_skipped', lang_code=lang)}" for name in result.skipped),
+        *result.errors,
+    ]
     return "\n".join([counts, *details])
 
 

@@ -187,10 +187,3 @@ def disambiguate_filenames(filenames: Sequence[str]) -> list[str]:
         result.append(candidate)
 
     return result
-
-
-def extract_metadata(*args: Any, **kwargs: Any) -> MessageMetadata:
-    """Compatibility entry point for Telegram metadata extraction."""
-    from .adapters.telegram.metadata import extract_metadata as extract_telegram_metadata
-
-    return extract_telegram_metadata(*args, **kwargs)

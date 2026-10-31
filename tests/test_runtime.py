@@ -10,7 +10,8 @@ from immich_chat_importer.pipeline import IngestItem
 from immich_chat_importer.runtime import ingestion_runtime
 
 
-async def test_combined_runtime_stops_both_adapters_together(tmp_path, monkeypatch):
+@pytest.mark.parametrize("first_fails", [False, True])
+async def test_combined_runtime_stops_both_adapters_together(tmp_path, monkeypatch, first_fails):
     from immich_chat_importer.__main__ import run
 
     started = asyncio.Event()
@@ -20,6 +21,8 @@ async def test_combined_runtime_stops_both_adapters_together(tmp_path, monkeypat
     async def telegram(settings, pipeline):
         pipelines.append(pipeline)
         await started.wait()
+        if first_fails:
+            raise ValueError("adapter failed")
 
     async def discord(settings, pipeline):
         pipelines.append(pipeline)
@@ -29,7 +32,7 @@ async def test_combined_runtime_stops_both_adapters_together(tmp_path, monkeypat
         finally:
             stopped.set()
 
-    monkeypatch.setattr("immich_chat_importer.__main__.run_bot", telegram)
+    monkeypatch.setattr("immich_chat_importer.adapters.telegram.bot.run_bot", telegram)
     monkeypatch.setattr("immich_chat_importer.adapters.discord.bot.run_discord", discord)
     settings = Settings.model_construct(
         data_dir=tmp_path,
@@ -38,7 +41,11 @@ async def test_combined_runtime_stops_both_adapters_together(tmp_path, monkeypat
         immich_api_key="key",
         enabled_platforms=["telegram", "discord"],
     )
-    await asyncio.wait_for(run(settings), timeout=2)
+    if first_fails:
+        with pytest.raises(ValueError, match="adapter failed"):
+            await asyncio.wait_for(run(settings), timeout=2)
+    else:
+        await asyncio.wait_for(run(settings), timeout=2)
     assert len(pipelines) == 2 and pipelines[0] is pipelines[1]
     assert stopped.is_set()
 
@@ -137,3 +144,27 @@ async def test_discord_without_album_does_not_use_telegram_album(tmp_path, monke
         )
     assert result.uploaded == 1
     assert all("/albums" not in str(request.url) for request in requests)
+
+
+@pytest.mark.parametrize("platform", ["telegram", "discord"])
+async def test_single_platform_only_starts_selected_adapter(tmp_path, monkeypatch, platform):
+    from immich_chat_importer.__main__ import run
+
+    calls = []
+
+    async def telegram(settings, pipeline):
+        calls.append("telegram")
+
+    async def discord(settings, pipeline):
+        calls.append("discord")
+
+    monkeypatch.setattr("immich_chat_importer.adapters.telegram.bot.run_bot", telegram)
+    monkeypatch.setattr("immich_chat_importer.adapters.discord.bot.run_discord", discord)
+    settings = Settings.model_construct(
+        immich_url="https://immich.test",
+        immich_api_key="key",
+        data_dir=tmp_path,
+        enabled_platforms=[platform, platform],
+    )
+    await run(settings)
+    assert calls == [platform]

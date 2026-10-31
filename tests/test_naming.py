@@ -5,10 +5,10 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from immich_chat_importer.adapters.telegram.metadata import extract_metadata
 from immich_chat_importer.naming import (
     MessageMetadata,
     disambiguate_filenames,
-    extract_metadata,
     render_stem,
     resolve_album_name,
     resolve_filename,

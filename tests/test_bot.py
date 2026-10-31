@@ -377,26 +377,54 @@ async def test_extract_ingest_item_preserves_document_extension(
     assert item.original_file_name == original_name
 
 
-async def test_telegram_media_import_records_result_before_reply(tmp_path, monkeypatch):
+@pytest.mark.parametrize("retrieval_error", ["network", "rate_limit", "archive"])
+async def test_telegram_media_import_records_result_before_reply(
+    tmp_path, monkeypatch, retrieval_error
+):
     from datetime import UTC, datetime
     from unittest.mock import AsyncMock
 
     from aiogram import Bot, Dispatcher
     from aiogram.types import File, Message
 
-    from immich_chat_importer.batches import IngestBatches
     from immich_chat_importer.adapters.telegram.bot import run_bot
+    from immich_chat_importer.batches import IngestBatches
     from immich_chat_importer.config import Settings
     from immich_chat_importer.pipeline import IngestionPipeline
     from immich_chat_importer.state import State
 
     photo = tmp_path / "photo.jpg"
     photo.write_bytes(b"image")
-    monkeypatch.setattr(
-        Bot,
-        "get_file",
-        AsyncMock(return_value=File(file_id="file", file_unique_id="unique", file_path=str(photo))),
+    if retrieval_error == "archive":
+        from zipfile import ZipFile
+
+        archive = tmp_path / "photos.zip"
+        with ZipFile(archive, "w") as bundle:
+            bundle.write(photo, "photo.jpg")
+            bundle.writestr("notes.txt", "skipped content")
+        photo = archive
+    from aiogram.exceptions import TelegramNetworkError, TelegramRetryAfter
+    from aiogram.methods import GetFile
+
+    method = GetFile(file_id="file")
+    error = (
+        TelegramNetworkError(method=method, message="temporary")
+        if retrieval_error == "network"
+        else TelegramRetryAfter(method=method, message="rate limited", retry_after=2)
     )
+    retrieval = AsyncMock(
+        side_effect=[
+            error,
+            error,
+            File(file_id="file", file_unique_id="unique", file_path=str(photo)),
+        ]
+    )
+    monkeypatch.setattr(Bot, "get_file", retrieval)
+
+    async def no_wait(delay):
+        pass
+
+    monkeypatch.setattr("immich_chat_importer.retry.asyncio.sleep", no_wait)
     immich = AsyncMock()
     immich.upload_asset.return_value = {"id": "asset", "status": "created"}
     pipeline = IngestionPipeline(immich, State())
@@ -407,6 +435,8 @@ async def test_telegram_media_import_records_result_before_reply(tmp_path, monke
         record = (await batches.recent("telegram", 42))[0]
         assert record.status == "completed"
         assert record.uploaded == 1
+        if retrieval_error == "archive":
+            assert "notes.txt" in text
         replies.append(text)
         raise RuntimeError("reply delivery failed")
 
@@ -417,7 +447,7 @@ async def test_telegram_media_import_records_result_before_reply(tmp_path, monke
             "date": datetime.now(UTC),
             "chat": {"id": 42, "type": "private"},
             "from": {"id": 42, "is_bot": False, "first_name": "Alice"},
-            "document": {"file_id": "file", "file_unique_id": "unique", "file_name": "photo.jpg"},
+            "document": {"file_id": "file", "file_unique_id": "unique", "file_name": photo.name},
         }
     )
 
@@ -435,4 +465,5 @@ async def test_telegram_media_import_records_result_before_reply(tmp_path, monke
     )
     await run_bot(settings, pipeline)
     assert len(replies) == 1
+    assert retrieval.await_count == 3
     assert (await batches.recent("telegram", 42))[0].errors == 0

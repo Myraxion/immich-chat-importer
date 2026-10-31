@@ -75,29 +75,16 @@ class IngestBatches:
         try:
             try:
                 async with prepare(batch):
-                    if batch.items or request.platform == "telegram":
+                    if batch.items:
                         batch.stage = "ingestion"
                         await state.wait_ingest_record(record_id)
-                        try:
-                            summary = await self._pipeline.ingest(
-                                batch.items, record_id=record_id, summary=summary
-                            )
-                        except Exception as exc:
-                            if request.platform != "telegram":
-                                raise
-                            summary.errors += 1
-                            summary.error_messages.append(str(exc))
-                            summary.error_details.append(
-                                (request.message_id, "upload", failure_kind(exc))
-                            )
+                        summary = await self._pipeline.ingest(
+                            batch.items, record_id=record_id, summary=summary
+                        )
             except Exception as exc:
-                fatal = failure(
-                    request.message_id if request.platform == "telegram" else "Import",
-                    "upload" if request.platform == "telegram" else batch.stage,
-                    failure_kind(exc),
-                )
+                fatal = failure(request.message_id, batch.stage, failure_kind(exc))
             details = [failure(*detail) for detail in summary.error_details]
-            if fatal is None and len(details) != len(summary.error_messages):
+            if len(details) != len(summary.error_messages):
                 details = list(summary.error_messages)
             errors = [e for e in batch.errors if e is not None] + details
             if fatal:
@@ -109,11 +96,7 @@ class IngestBatches:
                 if error_count and (summary.uploaded or summary.duplicates)
                 else ("failed" if error_count else "completed")
             )
-            record_details = errors
-            if request.platform == "discord" and fatal is None:
-                record_details = [*(f"{name}: skipped" for name in skipped), *errors]
-            elif request.platform == "telegram" and fatal:
-                record_details = [e for e in batch.errors if e is not None] + [fatal]
+            record_details = [*(f"{name}: skipped" for name in skipped), *errors]
             await state.finish_ingest_record(
                 record_id,
                 status,
