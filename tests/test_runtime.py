@@ -7,6 +7,34 @@ import pytest
 from immich_tg_bot.config import Settings
 from immich_tg_bot.pipeline import IngestItem
 from immich_tg_bot.runtime import ingestion_runtime
+from immich_tg_bot.state import State
+
+
+async def test_restart_interrupts_unfinished_records_without_changing_completed(tmp_path):
+    settings = Settings.model_construct(
+        data_dir=tmp_path, album_name=None, immich_url="https://immich.test", immich_api_key="key"
+    )
+    async with ingestion_runtime(settings) as pipeline:
+        waiting = await pipeline.state.create_ingest_record(42, "channel", "waiting")
+        running = await pipeline.state.create_ingest_record(42, "channel", "running")
+        await pipeline.state.start_ingest_record(running)
+        finished = await pipeline.state.create_ingest_record(99, "other", "finished")
+        await pipeline.state.finish_ingest_record(finished, "completed", 1, 0, 0, 0, "saved")
+
+    async with ingestion_runtime(settings) as pipeline:
+        records = await pipeline.state.recent_ingest_records(42)
+        assert [(r.id, r.message_id, r.status) for r in records] == [
+            (running, "running", "interrupted"), (waiting, "waiting", "interrupted")
+        ]
+        completed = (await pipeline.state.recent_ingest_records(99))[0]
+        assert (completed.status, completed.uploaded, completed.details) == (
+            "completed", 1, "saved"
+        )
+
+    state = State(tmp_path / "state.sqlite")
+    await state.open()
+    assert all(r.status == "interrupted" for r in await state.recent_ingest_records(42))
+    await state.close()
 
 
 async def test_runtime_opens_shared_ingestion_and_closes_immich_on_error(

@@ -15,6 +15,7 @@ async def ingestion_runtime(settings: Settings) -> AsyncIterator[IngestionPipeli
     state = State(settings.data_dir / "state.sqlite")
     await state.open()
     try:
+        await state.interrupt_unfinished_ingest_records()
         immich = ImmichClient(base_url=settings.immich_url, api_key=settings.immich_api_key)
         try:
             album_id = None

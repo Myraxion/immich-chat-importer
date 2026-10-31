@@ -297,15 +297,18 @@ async def handle_menu(
                 str(interaction.locale) if interaction.locale else None, settings.default_language
             ),
         )
-    await interaction.edit_original_response(
-        content=result[:2000], allowed_mentions=discord.AllowedMentions.none()
-    )
-    for start in range(2000, len(result), 2000):
-        await interaction.followup.send(
-            result[start : start + 2000],
-            ephemeral=True,
-            allowed_mentions=discord.AllowedMentions.none(),
+    try:
+        await interaction.edit_original_response(
+            content=result[:2000], allowed_mentions=discord.AllowedMentions.none()
         )
+        for start in range(2000, len(result), 2000):
+            await interaction.followup.send(
+                result[start : start + 2000],
+                ephemeral=True,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+    except discord.HTTPException:
+        log.warning("Could not update Discord interaction response", exc_info=True)
 
 
 class CommandTranslator(app_commands.Translator):

@@ -101,6 +101,14 @@ class State:
         assert cur.lastrowid is not None
         return cur.lastrowid
 
+    async def interrupt_unfinished_ingest_records(self) -> None:
+        await self.db.execute(
+            "UPDATE ingest_records SET status='interrupted', "
+            "updated_at=strftime('%Y-%m-%d %H:%M:%S', 'now') "
+            "WHERE status IN ('waiting', 'processing')"
+        )
+        await self.db.commit()
+
     async def wait_ingest_record(self, record_id: int) -> None:
         await self.db.execute(
             "UPDATE ingest_records SET status='waiting', "
