@@ -27,8 +27,8 @@ VOLUME ["/data"]
 ENV PYTHONUNBUFFERED=1 \
     PATH="/app/.venv/bin:$PATH" \
     DATA_DIR=/data \
-    TG_FILES_DIR=/var/lib/telegram-bot-api \
-    TG_API_BASE=http://telegram-bot-api:8081
+    TELEGRAM_FILES_DIR=/var/lib/telegram-bot-api \
+    TELEGRAM_API_BASE=http://telegram-bot-api:8081
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD python -m immich_tg_bot.healthcheck || exit 1

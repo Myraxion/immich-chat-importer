@@ -453,7 +453,7 @@ async def test_expired_menu_reply_keeps_upload_and_status(tmp_path, monkeypatch)
     )
     settings = Settings.model_construct(
         data_dir=tmp_path, immich_url="https://immich.test", immich_api_key="key",
-        album_name=None, discord_album_name=None, discord_allowed_user_ids=[42],
+        telegram_album_name=None, discord_album_name=None, discord_allowed_user_ids=[42],
     )
     responses = []
 
@@ -544,7 +544,7 @@ async def test_restart_does_not_replay_and_manual_retry_finishes_album(tmp_path,
     )
     settings = Settings.model_construct(
         data_dir=tmp_path, immich_url="https://immich.test", immich_api_key="key",
-        album_name=None, discord_allowed_user_ids=[42],
+        telegram_album_name=None, discord_allowed_user_ids=[42],
     )
     replies = []
 

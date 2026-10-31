@@ -66,7 +66,7 @@ docker compose up -d
 ### 1. 创建 Telegram 机器人
 
 1. 打开 [@BotFather](https://t.me/BotFather)，发送 `/newbot`，按提示完成创建。
-2. 保存它提供的 **HTTP API token** → 填入 `BOT_TOKEN`。
+2. 保存它提供的 **HTTP API token** → 填入 `TELEGRAM_BOT_TOKEN`。
 3. （可选但推荐）：发送 `/setprivacy` → 选择 **Disable**。允许机器人在群组中读取转发消息（如果仅私聊机器人则无需配置）。
 
 ### 2. 获取 `api_id` / `api_hash`
@@ -103,9 +103,9 @@ networks:
 
 ### 5. 获取你的 Telegram 用户 ID
 
-给 [@userinfobot](https://t.me/userinfobot) 发送消息，复制它回复的数字 ID → 填入 `ALLOWED_USER_IDS`。
+给 [@userinfobot](https://t.me/userinfobot) 发送消息，复制它回复的数字 ID → 填入 `TELEGRAM_ALLOWED_USER_IDS`。
 
-需要允许多个用户？用英文逗号分隔：`ALLOWED_USER_IDS=11111111,22222222`。
+需要允许多个用户？用英文逗号分隔：`TELEGRAM_ALLOWED_USER_IDS=11111111,22222222`。
 
 ### 6. 启动服务
 
@@ -125,28 +125,32 @@ INFO immich_tg_bot.bot: Bot starting (allowed users: [...], album: Telegram Inbo
 
 ## Telegram 配置项说明
 
+**不兼容变更：** Telegram 专属环境变量现统一使用 `TELEGRAM_` 前缀。升级时请按下表修改现有 `.env`，旧名称不再读取。
+
+`BOT_TOKEN` → `TELEGRAM_BOT_TOKEN`; `ALLOWED_USER_IDS` → `TELEGRAM_ALLOWED_USER_IDS`; `ALBUM_NAME` → `TELEGRAM_ALBUM_NAME`; `ALBUM_NAME_TEMPLATE` → `TELEGRAM_ALBUM_NAME_TEMPLATE`; `MEDIA_NAME_TEMPLATE` → `TELEGRAM_MEDIA_NAME_TEMPLATE`; `DOCUMENT_NAME_TEMPLATE` → `TELEGRAM_DOCUMENT_NAME_TEMPLATE`; `TG_FILES_DIR` → `TELEGRAM_FILES_DIR`; `TG_API_BASE` → `TELEGRAM_API_BASE`.
+
 所有配置均从 `.env` 读取。Telegram 专属必填项仅在启用 Telegram 时适用；Discord 配置请参阅[部署指南](docs/discord-deployment.md)。
 
 | 环境变量 | 必填 | 默认值 | 说明 |
 |---|---|---|---|
-| `BOT_TOKEN` | ✅ | — | 来自 BotFather 的 Telegram 机器人 Token。 |
+| `TELEGRAM_BOT_TOKEN` | ✅ | — | 来自 BotFather 的 Telegram 机器人 Token。 |
 | `TELEGRAM_API_ID` | ✅ | — | 来自 my.telegram.org 的数字应用 ID。 |
 | `TELEGRAM_API_HASH` | ✅ | — | 来自 my.telegram.org 的应用 Hash。 |
 | `IMMICH_URL` | ✅ | — | 以 `/api` 结尾的 Immich Base URL。 |
 | `IMMICH_API_KEY` | ✅ | — | 在 Immich 账户设置中生成的 API Key。 |
-| `ALLOWED_USER_IDS` | ✅ | — | 英文逗号分隔的 Telegram 用户 ID 白名单。 |
-| `ALBUM_NAME` |  | `Telegram Inbox` | 默认回退相册名称。留空表示仅导入图库，不加入相册。 |
+| `TELEGRAM_ALLOWED_USER_IDS` | ✅ | — | 英文逗号分隔的 Telegram 用户 ID 白名单。 |
+| `TELEGRAM_ALBUM_NAME` |  | `Telegram Inbox` | 默认回退相册名称。留空表示仅导入图库，不加入相册。 |
 | `TZ` |  | `UTC` | 文件名及相册日期的时区（例如 `Asia/Shanghai`）。 |
 | `DEFAULT_LANGUAGE` |  | `en` | 默认回退回复语言（`en`、`zh`、`ja`、`ru`）。 |
-| `MEDIA_NAME_TEMPLATE` |  | `{source}_{message_id}_{index}` | 照片、视频、动图及音频的动态命名模板。 |
-| `DOCUMENT_NAME_TEMPLATE` |  | `{original_name}` | 文档文件的动态命名模板。 |
-| `ALBUM_NAME_TEMPLATE` |  | *(留空)* | 动态相册模板（例如 `{source}`）。若未命中则回退至 `ALBUM_NAME`。 |
+| `TELEGRAM_MEDIA_NAME_TEMPLATE` |  | `{source}_{message_id}_{index}` | 照片、视频、动图及音频的动态命名模板。 |
+| `TELEGRAM_DOCUMENT_NAME_TEMPLATE` |  | `{original_name}` | 文档文件的动态命名模板。 |
+| `TELEGRAM_ALBUM_NAME_TEMPLATE` |  | *(留空)* | 动态相册模板（例如 `{source}`）。若未命中则回退至 `TELEGRAM_ALBUM_NAME`。 |
 | `MAX_ARCHIVE_MB` |  | `2000` | 允许传入的压缩包大小上限（MB）。 |
 | `MAX_ARCHIVE_FILES` |  | `1000` | 单个压缩包的媒体条目数量上限；超限时上传前拒绝整个包。 |
 | `LOG_LEVEL` |  | `INFO` | 日志级别：`DEBUG` / `INFO` / `WARNING` / `ERROR`。 |
 | `DATA_DIR` |  | `/data` | 容器内部 `state.sqlite` 的存储路径。 |
-| `TG_FILES_DIR` |  | `/var/lib/telegram-bot-api` | 本地 Bot API 共享卷在容器内的挂载路径。 |
-| `TG_API_BASE` |  | `http://telegram-bot-api:8081` | 本地 Bot API 服务的访问地址。 |
+| `TELEGRAM_FILES_DIR` |  | `/var/lib/telegram-bot-api` | 本地 Bot API 共享卷在容器内的挂载路径。 |
+| `TELEGRAM_API_BASE` |  | `http://telegram-bot-api:8081` | 本地 Bot API 服务的访问地址。 |
 
 最后三项通常保持默认即可 —— 它们与默认的 `docker-compose.yml` 保持一致。
 

@@ -34,7 +34,7 @@ async def test_combined_runtime_stops_both_adapters_together(tmp_path, monkeypat
     monkeypatch.setattr("immich_tg_bot.discord_bot.run_discord", discord)
     settings = Settings.model_construct(
         data_dir=tmp_path,
-        album_name=None,
+        telegram_album_name=None,
         immich_url="https://immich.test",
         immich_api_key="key",
         enabled_platforms=["telegram", "discord"],
@@ -46,7 +46,10 @@ async def test_combined_runtime_stops_both_adapters_together(tmp_path, monkeypat
 
 async def test_restart_interrupts_unfinished_records_without_changing_completed(tmp_path):
     settings = Settings.model_construct(
-        data_dir=tmp_path, album_name=None, immich_url="https://immich.test", immich_api_key="key"
+        data_dir=tmp_path,
+        telegram_album_name=None,
+        immich_url="https://immich.test",
+        immich_api_key="key",
     )
     async with ingestion_runtime(settings) as pipeline:
         waiting = await pipeline.state.create_ingest_record(42, "channel", "waiting")
@@ -92,7 +95,10 @@ async def test_runtime_opens_shared_ingestion_and_closes_immich_on_error(
 
     monkeypatch.setattr("immich_tg_bot.immich.httpx.AsyncClient", make_client)
     settings = Settings.model_construct(
-        data_dir=tmp_path, album_name=None, immich_url="https://immich.test", immich_api_key="key"
+        data_dir=tmp_path,
+        telegram_album_name=None,
+        immich_url="https://immich.test",
+        immich_api_key="key",
     )
     image = tmp_path / "photo.jpg"
     image.write_bytes(b"photo")
@@ -107,3 +113,41 @@ async def test_runtime_opens_shared_ingestion_and_closes_immich_on_error(
         image.write_bytes(b"photo")
         result = await pipeline.ingest([IngestItem(1, 2, image, image.name, datetime.now(UTC))])
         assert result.duplicates == 1
+
+
+async def test_discord_without_album_does_not_use_telegram_album(tmp_path, monkeypatch):
+    requests = []
+    client_class = httpx.AsyncClient
+
+    def handle(request):
+        requests.append(request)
+        return httpx.Response(200, json={"id": "asset", "status": "created"})
+
+    def make_client(**kwargs):
+        return client_class(**kwargs, transport=httpx.MockTransport(handle))
+
+    monkeypatch.setattr("immich_tg_bot.immich.httpx.AsyncClient", make_client)
+    settings = Settings.model_construct(
+        data_dir=tmp_path,
+        telegram_album_name="Telegram Inbox",
+        immich_url="https://immich.test",
+        immich_api_key="key",
+    )
+    image = tmp_path / "photo.jpg"
+    image.write_bytes(b"photo")
+    async with ingestion_runtime(settings) as pipeline:
+        result = await pipeline.ingest(
+            [
+                IngestItem(
+                    1,
+                    2,
+                    image,
+                    image.name,
+                    datetime.now(UTC),
+                    platform="discord",
+                    attachment_id="1",
+                )
+            ]
+        )
+    assert result.uploaded == 1
+    assert all("/albums" not in str(request.url) for request in requests)

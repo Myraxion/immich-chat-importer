@@ -16,12 +16,12 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
-    bot_token: str = ""
+    telegram_bot_token: str = ""
     telegram_api_id: int | None = None
     telegram_api_hash: str = ""
     immich_url: str
     immich_api_key: str
-    allowed_user_ids: Annotated[list[int], NoDecode] = Field(default_factory=list)
+    telegram_allowed_user_ids: Annotated[list[int], NoDecode] = Field(default_factory=list)
     enabled_platforms: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["telegram"])
     discord_token: str = ""
     discord_allowed_user_ids: Annotated[list[int], NoDecode] = Field(default_factory=list)
@@ -30,10 +30,10 @@ class Settings(BaseSettings):
     discord_filename_template: str = "{original_name}"
     discord_max_attachment_mb: int = Field(default=2000, gt=0)
 
-    album_name: str | None = None
-    album_name_template: str = ""
-    media_name_template: str = "{source}_{message_id}_{index}"
-    document_name_template: str = "{original_name}"
+    telegram_album_name: str | None = None
+    telegram_album_name_template: str = ""
+    telegram_media_name_template: str = "{source}_{message_id}_{index}"
+    telegram_document_name_template: str = "{original_name}"
     tz: str = "UTC"
     default_language: str = "en"
 
@@ -42,11 +42,11 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     data_dir: Path = Path("/data")
-    tg_files_dir: Path = Path("/var/lib/telegram-bot-api")
-    tg_api_base: str = "http://telegram-bot-api:8081"
+    telegram_files_dir: Path = Path("/var/lib/telegram-bot-api")
+    telegram_api_base: str = "http://telegram-bot-api:8081"
     cleanup_local_files: bool = True
 
-    @field_validator("allowed_user_ids", "discord_allowed_user_ids", mode="before")
+    @field_validator("telegram_allowed_user_ids", "discord_allowed_user_ids", mode="before")
     @classmethod
     def _parse_user_ids(cls, v: object) -> list[int]:
         if isinstance(v, str):
@@ -57,7 +57,9 @@ class Settings(BaseSettings):
             else:
                 v = decoded if isinstance(decoded, list) else [decoded]
         if not isinstance(v, list):
-            raise ValueError("allowed_user_ids must be a comma-separated list or JSON array")
+            raise ValueError(
+                "telegram_allowed_user_ids must be a comma-separated list or JSON array"
+            )
         return [int(x) for x in v if str(x).strip()]
 
     @field_validator("enabled_platforms", mode="before")
@@ -75,7 +77,7 @@ class Settings(BaseSettings):
         if not self.enabled_platforms or set(self.enabled_platforms) - {"telegram", "discord"}:
             raise ValueError("enabled_platforms must contain telegram and/or discord")
         if "telegram" in self.enabled_platforms and not (
-            self.bot_token and self.telegram_api_id and self.telegram_api_hash
+            self.telegram_bot_token and self.telegram_api_id and self.telegram_api_hash
         ):
             raise ValueError("Telegram credentials are required when Telegram is enabled")
         if "discord" in self.enabled_platforms and not self.discord_token:

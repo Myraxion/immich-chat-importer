@@ -117,10 +117,10 @@ async def test_extract_ingest_item_from_photo_uses_dynamic_naming(tmp_path: Path
 
     settings = Settings.model_construct(
         tz="UTC",
-        media_name_template="{source}_{message_id}_{index}",
-        document_name_template="{original_name}",
-        album_name_template="{source}",
-        album_name="DefaultAlbum",
+        telegram_media_name_template="{source}_{message_id}_{index}",
+        telegram_document_name_template="{original_name}",
+        telegram_album_name_template="{source}",
+        telegram_album_name="DefaultAlbum",
     )
 
     item = await _extract_ingest_item(bot, cast(Any, msg), tmp_path, settings=settings, index=1)
@@ -285,7 +285,7 @@ async def test_extract_ingest_item_preserves_document_extension(
         bot,
         message,
         tmp_path,
-        settings=Settings.model_construct(tz="UTC", document_name_template=template),
+        settings=Settings.model_construct(tz="UTC", telegram_document_name_template=template),
     )
 
     assert item is not None

@@ -66,7 +66,7 @@ That's it. Send `/start` to your bot in Telegram, then forward a photo.
 ### 1. Create a Telegram bot
 
 1. Open [@BotFather](https://t.me/BotFather), send `/newbot`, follow prompts.
-2. Save the **HTTP API token** it gives you → goes into `BOT_TOKEN`.
+2. Save the **HTTP API token** it gives you → goes into `TELEGRAM_BOT_TOKEN`.
 3. Optional but recommended: `/setprivacy` → **Disable**. Lets the bot read forwarded messages in groups (irrelevant if you only DM the bot).
 
 ### 2. Get `api_id` / `api_hash`
@@ -103,9 +103,9 @@ networks:
 
 ### 5. Find your Telegram user ID
 
-Message [@userinfobot](https://t.me/userinfobot) and copy the number it replies with → `ALLOWED_USER_IDS`.
+Message [@userinfobot](https://t.me/userinfobot) and copy the number it replies with → `TELEGRAM_ALLOWED_USER_IDS`.
 
-Multiple users? Comma-separated: `ALLOWED_USER_IDS=11111111,22222222`.
+Multiple users? Comma-separated: `TELEGRAM_ALLOWED_USER_IDS=11111111,22222222`.
 
 ### 6. Start
 
@@ -125,28 +125,32 @@ Send `/start` to your bot. Forward a photo. Watch it appear in Immich within a f
 
 ## Telegram configuration
 
+**Breaking change:** Telegram-specific environment variables now use the `TELEGRAM_` prefix. Rename the old variables in existing `.env` files using the names in the table below; old names are not read.
+
+`BOT_TOKEN` → `TELEGRAM_BOT_TOKEN`; `ALLOWED_USER_IDS` → `TELEGRAM_ALLOWED_USER_IDS`; `ALBUM_NAME` → `TELEGRAM_ALBUM_NAME`; `ALBUM_NAME_TEMPLATE` → `TELEGRAM_ALBUM_NAME_TEMPLATE`; `MEDIA_NAME_TEMPLATE` → `TELEGRAM_MEDIA_NAME_TEMPLATE`; `DOCUMENT_NAME_TEMPLATE` → `TELEGRAM_DOCUMENT_NAME_TEMPLATE`; `TG_FILES_DIR` → `TELEGRAM_FILES_DIR`; `TG_API_BASE` → `TELEGRAM_API_BASE`.
+
 All settings are read from `.env`. Telegram-specific required values apply only when Telegram is enabled; see the [deployment guide](docs/discord-deployment.md) for Discord settings.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `BOT_TOKEN` | ✅ | — | Telegram bot token from BotFather. |
+| `TELEGRAM_BOT_TOKEN` | ✅ | — | Telegram bot token from BotFather. |
 | `TELEGRAM_API_ID` | ✅ | — | Numeric app id from my.telegram.org. |
 | `TELEGRAM_API_HASH` | ✅ | — | App hash from my.telegram.org. |
 | `IMMICH_URL` | ✅ | — | Immich base URL ending in `/api`. |
 | `IMMICH_API_KEY` | ✅ | — | API key from Immich account settings. |
-| `ALLOWED_USER_IDS` | ✅ | — | Comma-separated whitelist of Telegram user IDs. |
-| `ALBUM_NAME` |  | `Telegram Inbox` | Default fallback album. Empty = library only. |
+| `TELEGRAM_ALLOWED_USER_IDS` | ✅ | — | Comma-separated whitelist of Telegram user IDs. |
+| `TELEGRAM_ALBUM_NAME` |  | `Telegram Inbox` | Default fallback album. Empty = library only. |
 | `TZ` |  | `UTC` | Timezone for filename and album dates (e.g. `Asia/Shanghai`). |
 | `DEFAULT_LANGUAGE` |  | `en` | Default fallback reply language (`en`, `zh`, `ja`, `ru`). |
-| `MEDIA_NAME_TEMPLATE` |  | `{source}_{message_id}_{index}` | Dynamic naming template for photos, videos, animations, and audio. |
-| `DOCUMENT_NAME_TEMPLATE` |  | `{original_name}` | Dynamic naming template for document files. |
-| `ALBUM_NAME_TEMPLATE` |  | *(empty)* | Dynamic album template (e.g. `{source}`). Falls back to `ALBUM_NAME`. |
+| `TELEGRAM_MEDIA_NAME_TEMPLATE` |  | `{source}_{message_id}_{index}` | Dynamic naming template for photos, videos, animations, and audio. |
+| `TELEGRAM_DOCUMENT_NAME_TEMPLATE` |  | `{original_name}` | Dynamic naming template for document files. |
+| `TELEGRAM_ALBUM_NAME_TEMPLATE` |  | *(empty)* | Dynamic album template (e.g. `{source}`). Falls back to `TELEGRAM_ALBUM_NAME`. |
 | `MAX_ARCHIVE_MB` |  | `2000` | Hard limit for incoming archive size (MB). |
 | `MAX_ARCHIVE_FILES` |  | `1000` | Maximum media entries per archive; archives exceeding it are rejected before upload. |
 | `LOG_LEVEL` |  | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR`. |
 | `DATA_DIR` |  | `/data` | Inside-container path for `state.sqlite`. |
-| `TG_FILES_DIR` |  | `/var/lib/telegram-bot-api` | Inside-container path of the shared local-Bot-API volume. |
-| `TG_API_BASE` |  | `http://telegram-bot-api:8081` | URL of the local Bot API server. |
+| `TELEGRAM_FILES_DIR` |  | `/var/lib/telegram-bot-api` | Inside-container path of the shared local-Bot-API volume. |
+| `TELEGRAM_API_BASE` |  | `http://telegram-bot-api:8081` | URL of the local Bot API server. |
 
 
 The bottom three rarely need to change — they match the default `docker-compose.yml`.

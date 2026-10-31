@@ -114,7 +114,7 @@ def _media_info_for(message: Message) -> tuple[str | None, str, str, str]:
     return None, "", "", ""
 
 
-async def _resolve_local_path(bot: Bot, file_id: str, tg_files_dir: Path) -> Path:
+async def _resolve_local_path(bot: Bot, file_id: str, telegram_files_dir: Path) -> Path:
     """Locate a file exposed by the local Bot API through the shared volume."""
     tg_file = await bot.get_file(file_id)
     if tg_file.file_path is None:
@@ -123,7 +123,7 @@ async def _resolve_local_path(bot: Bot, file_id: str, tg_files_dir: Path) -> Pat
     if fp.is_absolute() and fp.exists():
         return fp
     # Relative paths are rooted at the local Bot API's per-bot work directory.
-    candidate = tg_files_dir / bot.token / fp
+    candidate = telegram_files_dir / bot.token / fp
     if candidate.exists():
         return candidate
     raise FileNotFoundError(f"Cannot locate downloaded file: {tg_file.file_path}")
@@ -132,14 +132,14 @@ async def _resolve_local_path(bot: Bot, file_id: str, tg_files_dir: Path) -> Pat
 async def _extract_ingest_item(
     bot: Bot,
     message: Message,
-    tg_files_dir: Path,
+    telegram_files_dir: Path,
     settings: Settings | None = None,
     index: int = 1,
 ) -> IngestItem | None:
     file_id, file_unique_id, media_type, original_name = _media_info_for(message)
     if not file_id:
         return None
-    local = await _resolve_local_path(bot, file_id, tg_files_dir)
+    local = await _resolve_local_path(bot, file_id, telegram_files_dir)
     original_file_name = original_name or local.name
     fallback_dt = message.date.astimezone(UTC) if message.date else datetime.now(UTC)
 
@@ -172,17 +172,17 @@ async def _extract_ingest_item(
         )
 
         if media_type == "document":
-            tmpl = settings.document_name_template
+            tmpl = settings.telegram_document_name_template
             default_tmpl = "{original_name}"
         else:
-            tmpl = settings.media_name_template
+            tmpl = settings.telegram_media_name_template
             default_tmpl = "{source}_{message_id}_{index}"
 
         file_name = resolve_filename(tmpl, meta, extension=ext, default_template=default_tmpl)
         target_album = resolve_album_name(
-            settings.album_name_template,
+            settings.telegram_album_name_template,
             meta,
-            fallback_album=settings.album_name,
+            fallback_album=settings.telegram_album_name,
         )
 
     return IngestItem(
@@ -279,15 +279,15 @@ async def run_bot(settings: Settings, pipeline: IngestionPipeline | None = None)
         return
 
     session = AiohttpSession(
-        api=TelegramAPIServer.from_base(settings.tg_api_base, is_local=True),
+        api=TelegramAPIServer.from_base(settings.telegram_api_base, is_local=True),
     )
     bot = Bot(
-        token=settings.bot_token,
+        token=settings.telegram_bot_token,
         session=session,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = Dispatcher()
-    dp.message.middleware(WhitelistMiddleware(set(settings.allowed_user_ids)))
+    dp.message.middleware(WhitelistMiddleware(set(settings.telegram_allowed_user_ids)))
 
     groups: dict[str, list[Message]] = {}
     group_tasks: dict[str, asyncio.Task[None]] = {}
@@ -301,7 +301,7 @@ async def run_bot(settings: Settings, pipeline: IngestionPipeline | None = None)
         for idx, m in enumerate(messages, start=1):
             try:
                 item = await _extract_ingest_item(
-                    bot, m, settings.tg_files_dir, settings=settings, index=idx
+                    bot, m, settings.telegram_files_dir, settings=settings, index=idx
                 )
                 if item:
                     raw_items.append((item, item.file_name))
@@ -387,8 +387,8 @@ async def run_bot(settings: Settings, pipeline: IngestionPipeline | None = None)
 
     log.info(
         "Bot starting (allowed users: %s, album: %s, immich: %s)",
-        settings.allowed_user_ids,
-        settings.album_name,
+        settings.telegram_allowed_user_ids,
+        settings.telegram_album_name,
         settings.immich_url,
     )
     try:
