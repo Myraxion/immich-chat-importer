@@ -68,9 +68,9 @@ async def test_naming_and_upload_share_one_inspection(
     import httpx
     from aiogram.types import Message
 
+    from immich_chat_importer.adapters.discord.bot import process_import
     from immich_chat_importer.adapters.telegram.bot import _extract_ingest_item
     from immich_chat_importer.config import Settings
-    from immich_chat_importer.adapters.discord.bot import process_import
     from immich_chat_importer.runtime import ingestion_runtime
 
     path = tmp_path / "photo.jpg"
@@ -161,13 +161,23 @@ async def test_naming_and_upload_share_one_inspection(
     assert sidecar.encode() in request.content
 
 
-async def test_archive_members_use_own_capture_time_and_keep_original_names(tmp_path):
+@pytest.mark.parametrize("reverse", [False, True])
+async def test_archive_members_use_own_capture_time_and_keep_original_names(
+    tmp_path, monkeypatch, reverse
+):
+    from pathlib import Path
     from unittest.mock import AsyncMock
     from zipfile import ZipFile
 
     from immich_chat_importer.pipeline import IngestionPipeline, IngestItem
     from immich_chat_importer.state import State
 
+    original_rglob = Path.rglob
+
+    def ordered_rglob(path, pattern):
+        return iter(sorted(original_rglob(path, pattern), reverse=reverse))
+
+    monkeypatch.setattr(Path, "rglob", ordered_rglob)
     dated = tmp_path / "dated.jpg"
     plain = tmp_path / "plain.jpg"
     exif = Image.Exif()
@@ -205,4 +215,7 @@ async def test_archive_members_use_own_capture_time_and_keep_original_names(tmp_
     assert uploads["plain.jpg"]["file_created_at"] == fallback
     assert all(upload["is_image"] for upload in uploads.values())
     immich.get_or_create_album.assert_awaited_once_with("Photos")
-    immich.add_to_album.assert_awaited_once_with("album", ["dated.jpg", "plain.jpg"])
+    immich.add_to_album.assert_awaited_once()
+    album_id, asset_ids = immich.add_to_album.await_args.args
+    assert album_id == "album"
+    assert sorted(asset_ids) == ["dated.jpg", "plain.jpg"]
