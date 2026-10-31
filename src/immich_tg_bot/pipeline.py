@@ -92,12 +92,26 @@ class IngestionPipeline:
         self._cleanup_local = cleanup_local
         self._ingest_lock = asyncio.Lock()
 
-    async def ingest(self, items: Sequence[IngestItem]) -> IngestSummary:
-        async with self._ingest_lock:
-            return await self._ingest(items)
+    @property
+    def state(self) -> State:
+        return self._state
 
-    async def _ingest(self, items: Sequence[IngestItem]) -> IngestSummary:
-        summary = IngestSummary()
+    async def ingest(
+        self,
+        items: Sequence[IngestItem],
+        record_id: int | None = None,
+        summary: IngestSummary | None = None,
+    ) -> IngestSummary:
+        async with self._ingest_lock:
+            if record_id is not None:
+                await self._state.start_ingest_record(record_id)
+            return await self._ingest(items, summary)
+
+    async def _ingest(
+        self, items: Sequence[IngestItem], summary: IngestSummary | None = None
+    ) -> IngestSummary:
+        if summary is None:
+            summary = IngestSummary()
         if not items:
             return summary
 

@@ -1,8 +1,25 @@
+from dataclasses import dataclass
 from pathlib import Path
 
 import aiosqlite
 
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS ingest_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    operator_id TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    message_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'waiting',
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now')),
+    uploaded INTEGER NOT NULL DEFAULT 0,
+    duplicates INTEGER NOT NULL DEFAULT 0,
+    skipped INTEGER NOT NULL DEFAULT 0,
+    errors INTEGER NOT NULL DEFAULT 0,
+    details TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS ingest_records_owner ON ingest_records(operator_id, id DESC);
+
 CREATE TABLE IF NOT EXISTS processed_messages (
     chat_id      INTEGER NOT NULL,
     message_id   INTEGER NOT NULL,
@@ -38,6 +55,21 @@ CREATE TABLE IF NOT EXISTS asset_albums (
 """
 
 
+@dataclass
+class IngestRecord:
+    id: int
+    source_id: str
+    message_id: str
+    status: str
+    created_at: str
+    updated_at: str
+    uploaded: int
+    duplicates: int
+    skipped: int
+    errors: int
+    details: str
+
+
 class State:
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -59,6 +91,57 @@ class State:
         if self._db is None:
             raise RuntimeError("State.open() was not called")
         return self._db
+
+    async def create_ingest_record(self, operator_id: int, source_id: str, message_id: str) -> int:
+        cur = await self.db.execute(
+            "INSERT INTO ingest_records (operator_id, source_id, message_id) VALUES (?, ?, ?)",
+            (str(operator_id), source_id, message_id),
+        )
+        await self.db.commit()
+        assert cur.lastrowid is not None
+        return cur.lastrowid
+
+    async def wait_ingest_record(self, record_id: int) -> None:
+        await self.db.execute(
+            "UPDATE ingest_records SET status='waiting', "
+            "updated_at=strftime('%Y-%m-%d %H:%M:%S', 'now') WHERE id=?",
+            (record_id,),
+        )
+        await self.db.commit()
+
+    async def start_ingest_record(self, record_id: int) -> None:
+        await self.db.execute(
+            "UPDATE ingest_records SET status='processing', "
+            "updated_at=strftime('%Y-%m-%d %H:%M:%S', 'now') WHERE id=?",
+            (record_id,),
+        )
+        await self.db.commit()
+
+    async def finish_ingest_record(
+        self,
+        record_id: int,
+        status: str,
+        uploaded: int,
+        duplicates: int,
+        skipped: int,
+        errors: int,
+        details: str,
+    ) -> None:
+        await self.db.execute(
+            "UPDATE ingest_records SET status=?, uploaded=?, duplicates=?, skipped=?, errors=?, "
+            "details=?, updated_at=strftime('%Y-%m-%d %H:%M:%S', 'now') WHERE id=?",
+            (status, uploaded, duplicates, skipped, errors, details, record_id),
+        )
+        await self.db.commit()
+
+    async def recent_ingest_records(self, operator_id: int) -> list[IngestRecord]:
+        cur = await self.db.execute(
+            "SELECT id, source_id, message_id, status, created_at, updated_at, uploaded, "
+            "duplicates, skipped, errors, details FROM ingest_records "
+            "WHERE operator_id=? ORDER BY id DESC LIMIT 5",
+            (str(operator_id),),
+        )
+        return [IngestRecord(*row) for row in await cur.fetchall()]
 
     async def already_processed(
         self, chat_id: int | str, message_id: int | str, file_index: int = 0

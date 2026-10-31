@@ -20,22 +20,22 @@ from .runtime import ingestion_runtime
 log = logging.getLogger(__name__)
 
 
-async def process_import(
+async def _process_import(
     message: Any,
     operator_id: int,
     settings: Settings,
     pipeline: IngestionPipeline,
     client: httpx.AsyncClient,
-    interaction: Any = None,
-) -> str | None:
+    interaction: Any,
+    record_id: int,
+    progress: dict[str, Any],
+) -> tuple[str, IngestSummary, list[str], list[str]]:
     """Process a Discord message on behalf of an authorized operator."""
-    if operator_id not in settings.discord_allowed_user_ids:
-        return None
     locale = getattr(interaction, "locale", None) if interaction else None
     lang = resolve_language(str(locale) if locale else None, settings.default_language)
     items: list[IngestItem] = []
-    errors: list[str] = []
-    skipped: list[str] = []
+    errors: list[str] = progress["errors"]
+    skipped: list[str] = progress["skipped"]
     limit = settings.discord_max_attachment_mb * 1024 * 1024
     author = message.author
     sender = (
@@ -69,6 +69,7 @@ async def process_import(
     download_dir.mkdir(parents=True, exist_ok=True)
     for index, attachment in enumerate(message.attachments, 1):
         name = attachment.filename or str(attachment.id)
+        progress["stage"] = f"{name}: download"
         if not (is_media(name) or is_archive(name)):
             skipped.append(name)
             continue
@@ -147,13 +148,21 @@ async def process_import(
             log.warning("Discord download failed for %s: %s", name, reason)
             errors.append(f"{name}: {t('discord_download', lang_code=lang)}: {reason}")
     try:
-        summary = await pipeline.ingest(items) if items else IngestSummary()
+        summary = progress["summary"]
+        if items:
+            progress["stage"] = "ingestion"
+            await pipeline.state.wait_ingest_record(record_id)
+            summary = await pipeline.ingest(items, record_id=record_id, summary=summary)
     finally:
         if settings.cleanup_local_files:
             for item in items:
-                item.local_path.unlink(missing_ok=True)
-    errors.extend(summary.error_messages)
-    skipped.extend(summary.skipped_messages)
+                try:
+                    item.local_path.unlink(missing_ok=True)
+                except OSError:
+                    progress["stage"] = f"{item.original_file_name}: cleanup"
+                    raise
+    errors = [*errors, *summary.error_messages]
+    skipped = [*skipped, *summary.skipped_messages]
     counts = t(
         "discord_counts",
         lang_code=lang,
@@ -163,7 +172,100 @@ async def process_import(
         errors=summary.errors + len(errors) - len(summary.error_messages),
     )
     details = [*(f"{name}: {t('discord_skipped', lang_code=lang)}" for name in skipped), *errors]
-    return "\n".join([counts, *details])
+    return "\n".join([counts, *details]), summary, skipped, errors
+
+
+async def process_import(
+    message: Any,
+    operator_id: int,
+    settings: Settings,
+    pipeline: IngestionPipeline,
+    client: httpx.AsyncClient,
+    interaction: Any = None,
+) -> str | None:
+    if operator_id not in settings.discord_allowed_user_ids:
+        return None
+    state = pipeline.state
+    record_id = await state.create_ingest_record(
+        operator_id, str(message.channel.id), str(message.id)
+    )
+    progress: dict[str, Any] = {
+        "summary": IngestSummary(),
+        "errors": [],
+        "skipped": [],
+        "stage": "preparation",
+    }
+    try:
+        await state.start_ingest_record(record_id)
+        result, summary, skipped, errors = await _process_import(
+            message, operator_id, settings, pipeline, client, interaction, record_id, progress
+        )
+        error_count = summary.errors + len(errors) - len(summary.error_messages)
+        status = (
+            "partial"
+            if error_count and (summary.uploaded or summary.duplicates)
+            else ("failed" if error_count else "completed")
+        )
+        await state.finish_ingest_record(
+            record_id,
+            status,
+            summary.uploaded,
+            summary.duplicates,
+            len(skipped),
+            error_count,
+            "\n".join([*(f"{name}: skipped" for name in skipped), *errors]),
+        )
+        return result
+    except Exception as exc:
+        log.exception("Discord import failed")
+        summary = progress["summary"]
+        errors = progress["errors"] + summary.error_messages + [f"{progress['stage']}: {exc}"]
+        skipped = progress["skipped"] + summary.skipped_messages
+        await state.finish_ingest_record(
+            record_id,
+            "partial" if summary.uploaded or summary.duplicates else "failed",
+            summary.uploaded,
+            summary.duplicates,
+            len(skipped),
+            summary.errors + len(progress["errors"]) + 1,
+            "\n".join(errors),
+        )
+        return f"Import failed: {exc}"
+
+
+async def handle_status(interaction: Any, settings: Settings, pipeline: IngestionPipeline) -> None:
+    lang = resolve_language(
+        str(interaction.locale) if interaction.locale else None, settings.default_language
+    )
+    if interaction.user.id not in settings.discord_allowed_user_ids:
+        content = t("discord_unauthorized", lang_code=lang)
+    else:
+        records = await pipeline.state.recent_ingest_records(interaction.user.id)
+        entries = []
+        for record in records:
+            counts = t(
+                "discord_counts",
+                lang_code=lang,
+                uploaded=record.uploaded,
+                duplicates=record.duplicates,
+                skipped=record.skipped,
+                errors=record.errors,
+            )
+            entries.append(
+                f"#{record.id} | {record.created_at} UTC | {record.status} | "
+                f"{record.source_id}/{record.message_id}\n{counts}"
+                + (f"\n{record.details}" if record.details else "")
+            )
+        content = "\n\n".join(entries) if entries else "No import records yet."
+    await interaction.response.send_message(
+        content[:2000], ephemeral=True, allowed_mentions=discord.AllowedMentions.none()
+    )
+    for start in range(2000, len(content), 2000):
+        await interaction.followup.send(
+            content[start : start + 2000],
+            ephemeral=True,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
 
 
 async def handle_dm(
@@ -241,6 +343,12 @@ async def run_discord(settings: Settings, pipeline: IngestionPipeline | None = N
             interaction: discord.Interaction, message: discord.Message
         ) -> None:
             await handle_menu(interaction, message, settings, pipeline, client)
+
+        @app_commands.allowed_installs(guilds=True, users=True)
+        @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+        @tree.command(name="status", description="Show your recent imports")
+        async def status(interaction: discord.Interaction) -> None:
+            await handle_status(interaction, settings, pipeline)
 
         @bot.event
         async def on_ready() -> None:

@@ -66,6 +66,19 @@ async def test_dm_imports_all_attachments_and_reports_skipped(tmp_path, monkeypa
     ) as client:
         async with ingestion_runtime(settings) as pipeline:
             await handle_dm(message, settings, pipeline, client)
+            from immich_tg_bot.discord_bot import handle_status
+
+            status_replies = []
+
+            async def send_message(content, **kwargs):
+                status_replies.append((content, kwargs))
+
+            interaction = SimpleNamespace(
+                user=author, locale="en-US", response=SimpleNamespace(send_message=send_message)
+            )
+            await handle_status(interaction, settings, pipeline)
+            assert "Uploaded: 2" in status_replies[0][0]
+            assert status_replies[0][1]["ephemeral"] is True
     assert len(uploads) == 2
     assert "2" in replies[0] and "1" in replies[0]
 
@@ -172,8 +185,13 @@ async def test_menu_private_response_uses_original_author_and_context(
 
     events = []
 
+    from immich_tg_bot.state import State
+
+    state = State(tmp_path / "state.sqlite")
+    await state.open()
+
     class Pipeline:
-        async def ingest(self, items):
+        async def ingest(self, items, record_id=None, summary=None):
             events.append((items[0].file_name, items[0].target_album, items[0].chat_id))
             return IngestSummary(uploaded=1)
 
@@ -210,7 +228,12 @@ async def test_menu_private_response_uses_original_author_and_context(
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(lambda req: httpx.Response(200, content=b"a"))
     ) as client:
-        await handle_menu(interaction, message, settings, Pipeline(), client)
+        pipeline = Pipeline()
+        pipeline.state = state
+        await handle_menu(interaction, message, settings, pipeline, client)
+    assert len(await state.recent_ingest_records(42)) == 1
+    assert await state.recent_ingest_records(99) == []
+    await state.close()
     assert events[0] == {"ephemeral": True, "thinking": True}
     assert events[1] == (f"{source}_Alice_10.jpg", source, 20)
     assert "已上传：1" in events[2]["content"]
@@ -307,3 +330,99 @@ async def test_dm_imports_real_archive(tmp_path, monkeypatch):
     assert b"photo.jpg" in uploads[0]
     assert "readme.txt" in replies[0]
     assert "Uploaded: 1" in replies[0]
+
+async def test_status_remains_responsive_during_upload_and_waiting_batch(tmp_path, monkeypatch):
+    import asyncio
+
+    from immich_tg_bot.discord_bot import handle_status
+
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    original = httpx.AsyncClient
+
+    async def immich(request):
+        if request.method == "POST" and request.url.path == "/assets":
+            entered.set()
+            await release.wait()
+            return httpx.Response(201, json={"id": "1", "status": "created"})
+        return httpx.Response(200, json=[])
+
+    monkeypatch.setattr(
+        "immich_tg_bot.immich.httpx.AsyncClient",
+        lambda **kw: original(**kw, transport=httpx.MockTransport(immich)),
+    )
+    settings = Settings.model_construct(
+        data_dir=tmp_path, immich_url="https://immich.test", immich_api_key="key",
+        discord_allowed_user_ids=[42],
+    )
+    author = SimpleNamespace(id=42, display_name="Alice", name="alice")
+
+    async def reply(*args, **kwargs):
+        pass
+
+    def message(number):
+        return SimpleNamespace(
+            id=number, channel=SimpleNamespace(id=20), author=author,
+            created_at=datetime.now(UTC), content="", reply=reply,
+            attachments=[SimpleNamespace(id=number, filename="a.jpg", size=1,
+                                         url="https://cdn.test/a")],
+        )
+
+    responses = []
+
+    async def send_message(content, **kwargs):
+        responses.append(content)
+
+    interaction = SimpleNamespace(
+        user=author, locale="en-US", response=SimpleNamespace(send_message=send_message)
+    )
+    async with original(transport=httpx.MockTransport(lambda req: httpx.Response(200, content=b"a"))) as client:
+        async with ingestion_runtime(settings) as pipeline:
+            first = asyncio.create_task(handle_dm(message(1), settings, pipeline, client))
+            try:
+                await asyncio.wait_for(entered.wait(), 2)
+                second = asyncio.create_task(handle_dm(message(2), settings, pipeline, client))
+                try:
+                    for _ in range(100):
+                        records = await pipeline.state.recent_ingest_records(42)
+                        if len(records) == 2:
+                            break
+                        await asyncio.sleep(0.01)
+                    await asyncio.wait_for(handle_status(interaction, settings, pipeline), 2)
+                    assert "waiting" in responses[0]
+                    assert "processing" in responses[0]
+                finally:
+                    release.set()
+                    await asyncio.wait_for(second, 2)
+            finally:
+                release.set()
+                await asyncio.wait_for(first, 2)
+
+async def test_status_denies_unlisted_users_and_reports_empty_history(tmp_path):
+    from immich_tg_bot.discord_bot import handle_status
+    from immich_tg_bot.state import State
+
+    state = State(tmp_path / "state.sqlite")
+    await state.open()
+    try:
+        record = await state.create_ingest_record(42, "20", "secret")
+        await state.finish_ingest_record(record, "failed", 0, 0, 0, 1, "photo.jpg: upload")
+        replies = []
+
+        async def send_message(content, **kwargs):
+            replies.append((content, kwargs))
+
+        settings = Settings.model_construct(discord_allowed_user_ids=[42, 43])
+        interaction = SimpleNamespace(
+            user=SimpleNamespace(id=43), locale="en-US",
+            response=SimpleNamespace(send_message=send_message),
+        )
+        pipeline = SimpleNamespace(state=state)
+        await handle_status(interaction, settings, pipeline)
+        interaction.user.id = 99
+        await handle_status(interaction, settings, pipeline)
+        assert replies[0][0] == "No import records yet."
+        assert "not authorized" in replies[1][0]
+        assert all(reply[1]["ephemeral"] for reply in replies)
+    finally:
+        await state.close()
