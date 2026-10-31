@@ -3,8 +3,10 @@ import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
+from PIL import Image, UnidentifiedImageError
 
 from .retry import retry
 
@@ -20,8 +22,9 @@ def sha1_file(path: Path, chunk: int = 65536) -> str:
 
 
 class ImmichClient:
-    def __init__(self, base_url: str, api_key: str) -> None:
+    def __init__(self, base_url: str, api_key: str, tz: str = "UTC") -> None:
         self.base_url = base_url
+        self._tz = ZoneInfo(tz)
         self._client = httpx.AsyncClient(
             base_url=base_url,
             headers={"x-api-key": api_key, "Accept": "application/json"},
@@ -59,10 +62,28 @@ class ImmichClient:
         if checksum:
             headers["x-immich-checksum"] = checksum
         upload_name = file_name or file_path.name
+        sidecar = None
+        try:
+            with Image.open(file_path):
+                # Keep original bytes/checksum intact. Immich extracts capture time from XMP.
+                date = file_created_at.astimezone(self._tz).isoformat()
+                sidecar = (
+                    '<x:xmpmeta xmlns:x="adobe:ns:meta/">'
+                    '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+                    '<rdf:Description xmlns:exif="http://ns.adobe.com/exif/1.0/" '
+                    f'exif:DateTimeOriginal="{date}"/>'
+                    "</rdf:RDF></x:xmpmeta>"
+                ).encode()
+        except (UnidentifiedImageError, OSError):
+            pass
 
         async def upload() -> dict[str, Any]:
             with file_path.open("rb") as f:
-                files = {"assetData": (upload_name, f, "application/octet-stream")}
+                files: dict[str, tuple[str, Any, str]] = {
+                    "assetData": (upload_name, f, "application/octet-stream")
+                }
+                if sidecar is not None:
+                    files["sidecarData"] = (f"{upload_name}.xmp", sidecar, "application/rdf+xml")
                 data = {
                     "deviceAssetId": device_asset_id,
                     "deviceId": device_id,

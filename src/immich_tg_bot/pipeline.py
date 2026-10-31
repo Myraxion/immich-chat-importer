@@ -5,7 +5,7 @@ import tempfile
 from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timezone, tzinfo
 from pathlib import Path
 
 from PIL import Image
@@ -49,20 +49,28 @@ class IngestSummary:
     skipped_messages: list[str] = field(default_factory=list)
 
 
-def _exif_datetime(path: Path) -> datetime | None:
+def _exif_datetime(path: Path, target_tz: tzinfo = UTC) -> datetime | None:
     try:
         with Image.open(path) as img:
             exif = img.getexif()
+            original = exif.get_ifd(34665)
     except Exception:
         return None
     if not exif:
         return None
-    for tag in (_EXIF_DATETIME_ORIGINAL, _EXIF_DATETIME):
-        raw = exif.get(tag)
+    for tag, offset_tag in ((_EXIF_DATETIME_ORIGINAL, 36881), (_EXIF_DATETIME, 36880)):
+        raw = original.get(tag) or exif.get(tag)
         if not raw:
             continue
         try:
-            return datetime.strptime(str(raw), "%Y:%m:%d %H:%M:%S").replace(tzinfo=UTC)
+            value = datetime.strptime(str(raw), "%Y:%m:%d %H:%M:%S")
+            offset = original.get(offset_tag) or exif.get(offset_tag)
+            zone = target_tz
+            if offset:
+                parsed = datetime.strptime(str(offset), "%z").utcoffset()
+                if parsed is not None:
+                    zone = timezone(parsed)
+            return value.replace(tzinfo=zone)
         except ValueError:
             continue
     return None
@@ -85,6 +93,7 @@ class IngestionPipeline:
         max_archive_files: int = 1000,
         device_id: str = DEVICE_ID,
         cleanup_local: bool = True,
+        target_tz: tzinfo = UTC,
     ) -> None:
         self._immich = immich
         self._state = state
@@ -93,6 +102,7 @@ class IngestionPipeline:
         self._max_archive_files = max_archive_files
         self._device_id = device_id
         self._cleanup_local = cleanup_local
+        self._target_tz = target_tz
         self._ingest_lock = asyncio.Lock()
 
     @property
@@ -292,7 +302,7 @@ class IngestionPipeline:
         checksum = await asyncio.to_thread(sha1_file, file_path)
         if archive_member:
             device_asset_id = f"{device_asset_id}:{checksum}"
-        created_at = _exif_datetime(file_path) or fallback_created_at
+        created_at = _exif_datetime(file_path, self._target_tz) or fallback_created_at
         modified_at = datetime.fromtimestamp(file_path.stat().st_mtime, tz=UTC)
 
         result = await self._immich.upload_asset(

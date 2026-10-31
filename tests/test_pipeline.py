@@ -15,6 +15,57 @@ from immich_tg_bot.pipeline import IngestionPipeline, IngestItem
 from immich_tg_bot.state import State
 
 
+@pytest.mark.parametrize(
+    "exif_date, offset, expected",
+    [
+        (None, None, "2026-10-31T19:38:32+08:00"),
+        ("2026:10:31 14:00:00", None, "2026-10-31T14:00:00+08:00"),
+        ("2026:10:31 14:00:00", "+09:00", "2026-10-31T13:00:00+08:00"),
+    ],
+)
+async def test_upload_image_carries_local_capture_date_sidecar(
+    tmp_path, monkeypatch, exif_date, offset, expected
+):
+    import httpx
+    from PIL import Image
+
+    from immich_tg_bot.runtime import ingestion_runtime
+
+    photo = tmp_path / "photo.jpg"
+    exif = Image.Exif()
+    if exif_date:
+        exif[34665] = {36867: exif_date}
+        if offset:
+            exif[34665][36881] = offset
+    Image.new("RGB", (2, 2)).save(photo, exif=exif)
+    original_bytes = photo.read_bytes()
+    requests = []
+    original = httpx.AsyncClient
+
+    def upload(request):
+        requests.append(request.content)
+        return httpx.Response(201, json={"id": "asset", "status": "created"})
+
+    monkeypatch.setattr(
+        "immich_tg_bot.immich.httpx.AsyncClient",
+        lambda **kw: original(**kw, transport=httpx.MockTransport(upload)),
+    )
+    settings = Settings.model_construct(
+        tz="Asia/Shanghai",
+        immich_url="https://immich.test",
+        immich_api_key="test",
+        cleanup_local_files=False,
+    )
+    async with ingestion_runtime(settings) as pipeline:
+        summary = await pipeline.ingest(
+            [IngestItem(1, 2, photo, "photo.jpg", datetime(2026, 10, 31, 11, 38, 32, tzinfo=UTC))]
+        )
+    assert summary.uploaded == 1
+    assert b'name="sidecarData"' in requests[0]
+    assert expected.encode() in requests[0]
+    assert photo.read_bytes() == original_bytes
+
+
 async def test_reimport_checks_immich_and_restores_album_membership(
     tmp_path: Path, state: State, fake_immich: AsyncMock
 ) -> None:

@@ -1,6 +1,6 @@
 ## Problem Statement
 
-Scope update (2026-10-31): native forwarded-message snapshot attachments are now supported through both bot DMs and message menu imports, as requested after real-account usage. They follow the same type, size, archive, and result-reporting rules as direct attachments. Naming uses the forwarding message's metadata because snapshots do not expose the original author. `/status` timestamps on both platforms use the configured `TZ`.
+Scope update (2026-10-31): native forwarded-message snapshot attachments are now supported through both bot DMs and message menu imports, as requested after real-account usage. They follow the same type, size, archive, and result-reporting rules as direct attachments. `{source}` resolves the referenced original channel name through the bot API, falling back to the channel ID when unavailable; sender and message date use the forwarding message. `/status` timestamps on both platforms use the configured `TZ`. Pillow-readable images include a capture-date XMP sidecar with the configured timezone offset; original bytes and content deduplication remain unchanged. Existing duplicate assets are not updated.
 
 Users who keep their photo and video library in Immich cannot currently import Discord attachments through this project. They must download files and upload them manually, even though the existing Telegram integration already provides ingestion, archive extraction, deduplication, naming, and album routing.
 

@@ -293,13 +293,14 @@ For an attachment `photo.jpg` sent by Alice on 2026-10-31, the filename would be
 
 ### Discord
 
-- **Forwarded messages**: Attachments in native Discord forwarded-message snapshots are supported in bot DMs and message menu imports. Naming uses the forwarding message's sender, time, and context.
+- **Forwarded messages**: Attachments in native Discord forwarded-message snapshots are supported in bot DMs and message menu imports. `{source}` uses the original channel name when accessible to the bot, otherwise its channel ID. The sender and message time come from the forwarding message.
 - **Attachment & archive limitations**: Supported formats include photos, videos, and archives (ZIP, RAR, 7z, tar variants, including ordinary subdirectories). Nested archives and non-media entries are skipped; password-protected or invalid archives fail. Individual attachment size is capped by `DISCORD_MAX_ATTACHMENT_MB`.
 - **Privacy & permissions**: The bot does not monitor arbitrary chats; it only handles direct DMs and explicitly triggered message menu imports. Menu replies are ephemeral (visible only to the caller).
 - **Status history**: Import history queried via `/status` is kept in memory and cleared upon restart. It will not resume unfinished jobs automatically.
 
 ### Cross-platform & shared behavior
 
+- **Image capture dates**: For images readable by Pillow, uploads include an XMP sidecar with the capture date and the configured `TZ` offset, without modifying image bytes. EXIF dates without an offset use `TZ`; otherwise the existing capture instant is preserved. Images without EXIF dates use the message time. Videos and other formats retain Immich's native metadata extraction. Existing duplicate assets are not automatically updated.
 - **Exact-content deduplication**: Both platforms share Immich's exact-content deduplication (based on SHA-1 hash), without visual similarity matching. Uploading existing assets reuses them while ensuring they are linked to the target album.
 - **Single account**: Each deployment corresponds to a single Immich account.
 

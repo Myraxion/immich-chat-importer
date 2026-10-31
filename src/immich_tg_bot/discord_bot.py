@@ -22,6 +22,24 @@ from .runtime import ingestion_runtime
 log = logging.getLogger(__name__)
 
 
+async def _forward_source(message: Any, settings: Settings, client: httpx.AsyncClient) -> str:
+    reference = getattr(message, "reference", None)
+    if not reference or reference.type != discord.MessageReferenceType.forward:
+        return ""
+    channel_id = reference.channel_id
+    if settings.discord_token:
+        try:
+            response = await client.get(
+                f"https://discord.com/api/v10/channels/{channel_id}",
+                headers={"Authorization": f"Bot {settings.discord_token}"},
+            )
+            response.raise_for_status()
+            return response.json().get("name") or str(channel_id)
+        except httpx.HTTPError:
+            log.info("Discord source channel %s unavailable; using channel ID", channel_id)
+    return str(channel_id)
+
+
 async def _process_import(
     message: Any,
     operator_id: int,
@@ -52,10 +70,12 @@ async def _process_import(
         if guild_id
         else sender
     )
+    forward_source = await _forward_source(message, settings, client)
+    source = forward_source or source
     msg_date = message.created_at.astimezone(ZoneInfo(settings.tz))
     metadata = MessageMetadata(
         source=source,
-        source_id=str(author.id),
+        source_id=str(message.reference.channel_id) if forward_source else str(author.id),
         source_username=getattr(author, "name", "") or str(author.id),
         message_id=str(message.id),
         date=msg_date,
@@ -112,7 +132,7 @@ async def _process_import(
 
             await retry(download, f"download: {name}")
             stem, extension = split_filename(name)
-            exif_date = _exif_datetime(path)
+            exif_date = _exif_datetime(path, ZoneInfo(settings.tz))
             item_metadata = replace(
                 metadata,
                 index=index,

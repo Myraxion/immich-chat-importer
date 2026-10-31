@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- 图片上传附带包含拍摄日期和 `TZ` 时区偏移的 XMP sidecar，原图字节保持不变；无时区 EXIF 使用 `TZ`，已有偏移保留实际时间点。已存在的重复资产不会自动更新日期。
+- Discord 转发图片的 `{source}` 使用原频道名称，无权限查询时使用频道 ID。
 - Telegram 和 Discord 的 `/status` 按 `TZ` 配置显示时间和时区，修复始终显示 UTC 的问题。
 - Discord 私信和消息菜单支持导入原生转发消息快照中的附件，修复转发图片时结果全部为 0 的问题。
 

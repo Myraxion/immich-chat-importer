@@ -204,7 +204,7 @@ async def _extract_ingest_item(
                 ext = ".mp4"
         if not split_filename(original_file_name)[1]:
             original_file_name += ext
-        exif_dt = _exif_datetime(local)
+        exif_dt = _exif_datetime(local, target_tz)
         meta = extract_metadata(
             message,
             target_tz=target_tz,

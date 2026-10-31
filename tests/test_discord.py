@@ -47,7 +47,8 @@ async def test_discord_status_uses_configured_timezone(monkeypatch, tz, expected
 
 
 @pytest.mark.parametrize("entrypoint", ["dm", "menu"])
-async def test_forwarded_attachments_are_imported(tmp_path, monkeypatch, entrypoint):
+@pytest.mark.parametrize("channel_name", [None, "photos"])
+async def test_forwarded_attachments_are_imported(tmp_path, monkeypatch, entrypoint, channel_name):
     import discord
 
     from immich_tg_bot.discord_bot import handle_menu
@@ -103,6 +104,12 @@ async def test_forwarded_attachments_are_imported(tmp_path, monkeypatch, entrypo
         content="",
         attachments=[],
         message_snapshots=[snapshot],
+        reference=discord.MessageReference(
+            message_id=100,
+            channel_id=999,
+            guild_id=888,
+            type=discord.MessageReferenceType.forward,
+        ),
         reply=reply,
     )
     settings = Settings.model_construct(
@@ -111,9 +118,20 @@ async def test_forwarded_attachments_are_imported(tmp_path, monkeypatch, entrypo
         immich_api_key="test-key",
         discord_allowed_user_ids=[42],
         discord_album_name=None,
+        discord_filename_template="{source}_{index}",
+        discord_token="test-token",
     )
 
     def download(request):
+        if request.url.host == "discord.com":
+            assert request.url.path == "/api/v10/channels/999"
+            assert request.headers["Authorization"] == "Bot test-token"
+            return (
+                httpx.Response(200, json={"name": channel_name})
+                if channel_name
+                else httpx.Response(403)
+            )
+        assert "Authorization" not in request.headers
         downloads.append(request.url.path)
         return httpx.Response(200, content=request.url.path.encode())
 
@@ -134,6 +152,7 @@ async def test_forwarded_attachments_are_imported(tmp_path, monkeypatch, entrypo
             assert (records[0].uploaded, records[0].skipped, records[0].errors) == (2, 1, 0)
     assert downloads == ["/a.jpg", "/b.mp4"]
     assert len(uploads) == 2
+    assert f'filename="{channel_name or 999}_1.jpg"'.encode() in uploads[0]
     assert "Uploaded: 2, duplicates: 0, skipped: 1, errors: 0" in replies[0]
     assert "note.txt" in replies[0]
     assert list((tmp_path / "discord-downloads").iterdir()) == []
