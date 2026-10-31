@@ -3,9 +3,11 @@
 .env.*
 !.env.example
 data/
+data-discord-test/
 *.session
 *.session-journal
 
+.scratch/
 # === Python ===
 __pycache__/
 *.py[cod]

@@ -118,7 +118,8 @@ class State:
     async def source_assets(self, identity: tuple[str, str, str, str]) -> list[tuple[str, str]]:
         cur = await self.db.execute(
             "SELECT asset_id, file_name FROM source_assets WHERE platform=? AND source_id=? "
-            "AND message_id=? AND attachment_id=?", identity
+            "AND message_id=? AND attachment_id=?",
+            identity,
         )
         return [(row[0], row[1]) for row in await cur.fetchall()]
 
