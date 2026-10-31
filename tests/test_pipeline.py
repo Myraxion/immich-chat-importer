@@ -324,6 +324,7 @@ def fake_immich() -> AsyncMock:
     client = AsyncMock()
     client.upload_asset.return_value = {"id": "asset-123", "status": "created"}
     client.add_to_album.return_value = None
+    client.get_or_create_album.return_value = "album-123"
     return client
 
 
@@ -1011,3 +1012,33 @@ async def test_encrypted_archive_reports_failure(tmp_path, state, fake_immich):
     assert result.errors == 1
     assert "encrypted.zip" in result.error_messages[0]
     fake_immich.upload_asset.assert_not_awaited()
+
+
+async def test_archive_imports_legacy_gbk_filename(tmp_path, state, fake_immich):
+    import zipfile
+
+    archive = tmp_path / "legacy.zip"
+    raw_name = "照片.png".encode("gbk")
+    placeholder = "x" * len(raw_name)
+    with zipfile.ZipFile(archive, "w") as bundle:
+        bundle.writestr(placeholder, b"photo")
+    archive.write_bytes(archive.read_bytes().replace(placeholder.encode(), raw_name))
+    item = IngestItem(
+        1, 2, archive, archive.name, datetime.now(UTC), platform="discord", attachment_id="1"
+    )
+    result = await IngestionPipeline(fake_immich, state).ingest([item])
+    assert result.uploaded == 1
+    assert fake_immich.upload_asset.await_args.kwargs["file_name"] == "照片.png"
+
+
+async def test_recreated_album_receives_existing_asset(tmp_path, state, fake_immich):
+    path = tmp_path / "photo.jpg"
+    path.write_bytes(b"photo")
+    fake_immich.get_or_create_album.side_effect = ["old-album", "new-album"]
+    item = IngestItem(1, 2, path, path.name, datetime.now(UTC), target_album="trip")
+    pipeline = IngestionPipeline(fake_immich, state, cleanup_local=False)
+    first = await pipeline.ingest([item])
+    second = await pipeline.ingest([item])
+    assert (first.uploaded, second.duplicates, second.errors) == (1, 1, 0)
+    fake_immich.add_to_album.assert_any_await("new-album", ["asset-123"])
+    assert fake_immich.upload_asset.await_count == 1

@@ -105,7 +105,7 @@ async def test_upload_asset_passes_custom_filename(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_or_create_album_uses_cache() -> None:
+async def test_get_or_create_album_refreshes_album_list() -> None:
     get_calls = 0
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -121,7 +121,7 @@ async def test_get_or_create_album_uses_cache() -> None:
         id2 = await client.get_or_create_album("MyAlbum")
         assert id1 == "album-1"
         assert id2 == "album-1"
-        assert get_calls == 1  # Cache hit on second call
+        assert get_calls == 2
     finally:
         await client.aclose()
 

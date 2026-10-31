@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import zipfile
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -71,9 +72,26 @@ def is_media(filename: str) -> bool:
 async def extract(archive: Path, dest: Path) -> None:
     """Extract any libarchive-supported format (zip/rar/7z/tar*) via bsdtar."""
     dest.mkdir(parents=True, exist_ok=True)
+    options = []
+    if zipfile.is_zipfile(archive):
+        with zipfile.ZipFile(archive) as bundle:
+            for entry in bundle.infolist():
+                if entry.flag_bits & 0x800 or entry.filename.isascii():
+                    continue
+                raw_name = entry.filename.encode("cp437")
+                try:
+                    raw_name.decode("utf-8")
+                except UnicodeDecodeError:
+                    try:
+                        raw_name.decode("gbk")
+                    except UnicodeDecodeError:
+                        continue
+                    options = ["--options", "hdrcharset=GBK"]
+                    break
     proc = await asyncio.create_subprocess_exec(
         "bsdtar",
         "-x",
+        *options,
         "-f",
         str(archive),
         "-C",

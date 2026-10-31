@@ -106,19 +106,20 @@ class IngestionPipeline:
             await self._ingest_item(item, summary, album_groups)
 
         for album_key, assets in album_groups.items():
-            pending = {
-                asset_id: name
-                for asset_id, name in assets.items()
-                if not await self._state.album_completed(asset_id, album_key)
-            }
-            if not pending:
-                continue
+            pending = assets
             stage = "album lookup/create"
             try:
                 if self._album_id and album_key == self._album_id:
                     target_id = self._album_id
                 else:
                     target_id = await self._immich.get_or_create_album(album_key)
+                pending = {
+                    asset_id: name
+                    for asset_id, name in assets.items()
+                    if not await self._state.album_completed(asset_id, target_id)
+                }
+                if not pending:
+                    continue
                 stage = "album association"
                 failures = await self._immich.add_to_album(target_id, list(pending)) or {}
                 for asset_id, name in pending.items():
@@ -128,7 +129,7 @@ class IngestionPipeline:
                             f"{name} ({asset_id}): {stage} {album_key}: {failures[asset_id]}"
                         )
                     else:
-                        await self._state.mark_album_completed(asset_id, album_key)
+                        await self._state.mark_album_completed(asset_id, target_id)
             except Exception as e:
                 log.warning(
                     "Failed to add %d asset(s) to album %r: %s",
