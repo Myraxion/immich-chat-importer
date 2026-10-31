@@ -1,4 +1,4 @@
-from immich_tg_bot.state import State
+from immich_chat_importer.state import State
 
 
 async def test_records_do_not_cross_platforms_for_same_user_id():

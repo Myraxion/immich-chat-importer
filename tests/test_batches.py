@@ -1,9 +1,9 @@
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock
 
-from immich_tg_bot.batches import IngestBatches, IngestRequest
-from immich_tg_bot.pipeline import IngestionPipeline
-from immich_tg_bot.state import State
+from immich_chat_importer.batches import IngestBatches, IngestRequest
+from immich_chat_importer.pipeline import IngestionPipeline
+from immich_chat_importer.state import State
 
 
 async def test_preparation_failure_is_recorded_and_isolated_by_platform():
@@ -26,7 +26,7 @@ async def test_preparation_failure_is_recorded_and_isolated_by_platform():
 async def test_cleanup_failure_preserves_uploaded_asset(tmp_path):
     from datetime import UTC, datetime
 
-    from immich_tg_bot.pipeline import IngestItem
+    from immich_chat_importer.pipeline import IngestItem
 
     immich = AsyncMock()
     immich.upload_asset.return_value = {"id": "asset", "status": "created"}
@@ -53,7 +53,7 @@ async def test_cleanup_failure_preserves_uploaded_asset(tmp_path):
 async def test_cancellation_restores_notice_without_settling():
     import asyncio
 
-    from immich_tg_bot.retry import retry_notice
+    from immich_chat_importer.retry import retry_notice
 
     batches = IngestBatches(IngestionPipeline(AsyncMock(), State()))
 
@@ -76,7 +76,7 @@ async def test_preparation_continues_while_another_batch_uploads(tmp_path):
     import asyncio
     from datetime import UTC, datetime
 
-    from immich_tg_bot.pipeline import IngestItem
+    from immich_chat_importer.pipeline import IngestItem
 
     entered = asyncio.Event()
     release = asyncio.Event()

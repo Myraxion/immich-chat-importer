@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from PIL import Image
 
-from immich_tg_bot.media_metadata import inspect_media
+from immich_chat_importer.media_metadata import inspect_media
 
 
 def test_exif_offset_preserves_capture_time_and_localizes_template_date(tmp_path):
@@ -68,10 +68,10 @@ async def test_naming_and_upload_share_one_inspection(
     import httpx
     from aiogram.types import Message
 
-    from immich_tg_bot.bot import _extract_ingest_item
-    from immich_tg_bot.config import Settings
-    from immich_tg_bot.discord_bot import process_import
-    from immich_tg_bot.runtime import ingestion_runtime
+    from immich_chat_importer.adapters.telegram.bot import _extract_ingest_item
+    from immich_chat_importer.config import Settings
+    from immich_chat_importer.adapters.discord.bot import process_import
+    from immich_chat_importer.runtime import ingestion_runtime
 
     path = tmp_path / "photo.jpg"
     exif = Image.Exif()
@@ -95,7 +95,7 @@ async def test_naming_and_upload_share_one_inspection(
         return httpx.Response(201, json={"id": "asset", "status": "created"})
 
     monkeypatch.setattr(
-        "immich_tg_bot.immich.httpx.AsyncClient",
+        "immich_chat_importer.immich.httpx.AsyncClient",
         lambda **kw: original_client(**kw, transport=httpx.MockTransport(upload)),
     )
     settings = Settings.model_construct(
@@ -165,8 +165,8 @@ async def test_archive_members_use_own_capture_time_and_keep_original_names(tmp_
     from unittest.mock import AsyncMock
     from zipfile import ZipFile
 
-    from immich_tg_bot.pipeline import IngestionPipeline, IngestItem
-    from immich_tg_bot.state import State
+    from immich_chat_importer.pipeline import IngestionPipeline, IngestItem
+    from immich_chat_importer.state import State
 
     dated = tmp_path / "dated.jpg"
     plain = tmp_path / "plain.jpg"

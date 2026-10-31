@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from immich_tg_bot.naming import (
+from immich_chat_importer.naming import (
     MessageMetadata,
     disambiguate_filenames,
     extract_metadata,
@@ -120,7 +120,7 @@ def test_render_stem_warns_only_for_unknown_variables(
         sender="Alice",
     )
 
-    with caplog.at_level(logging.WARNING, logger="immich_tg_bot.naming"):
+    with caplog.at_level(logging.WARNING, logger="immich_chat_importer.naming"):
         result = render_stem(template, meta, default_template="{source}_{message_id}_{index}")
 
     assert result == expected

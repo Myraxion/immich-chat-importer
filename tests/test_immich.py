@@ -3,7 +3,7 @@ from collections.abc import Callable
 import httpx
 import pytest
 
-from immich_tg_bot.immich import ImmichClient
+from immich_chat_importer.immich import ImmichClient
 
 
 @pytest.mark.asyncio
@@ -60,7 +60,7 @@ async def test_uncertain_album_creation_is_reconciled_without_repeating_post():
 async def test_upload_retries_transient_server_error_with_same_file(tmp_path, monkeypatch):
     from datetime import UTC, datetime
 
-    import immich_tg_bot.retry as retry
+    import immich_chat_importer.retry as retry
 
     async def no_wait(seconds):
         pass

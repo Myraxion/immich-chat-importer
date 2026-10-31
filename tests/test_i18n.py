@@ -2,7 +2,7 @@ from typing import Any
 
 import pytest
 
-from immich_tg_bot.i18n import SUPPORTED_LANGUAGES, resolve_language, t
+from immich_chat_importer.i18n import SUPPORTED_LANGUAGES, resolve_language, t
 
 
 @pytest.mark.parametrize(

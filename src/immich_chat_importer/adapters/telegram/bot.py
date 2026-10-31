@@ -17,21 +17,21 @@ from aiogram.enums import ParseMode
 from aiogram.filters import Command
 from aiogram.types import Message, TelegramObject
 
-from .batches import IngestBatches, IngestRequest, Preparation
-from .config import Settings
-from .errors import failure_kind, format_failure
-from .i18n import resolve_language, t
-from .media_metadata import inspect_media
-from .naming import (
+from ...batches import IngestBatches, IngestRequest, Preparation
+from ...config import Settings
+from ...errors import failure_kind, format_failure
+from ...i18n import resolve_language, t
+from ...media_metadata import inspect_media
+from ...naming import (
     disambiguate_filenames,
     resolve_album_name,
     resolve_filename,
     split_filename,
 )
-from .pipeline import IngestionPipeline, IngestItem, IngestSummary
-from .retry import retry
-from .runtime import ingestion_runtime
-from .telegram_metadata import extract_metadata
+from ...pipeline import IngestionPipeline, IngestItem, IngestSummary
+from ...retry import retry
+from ...runtime import ingestion_runtime
+from .metadata import extract_metadata
 
 log = logging.getLogger(__name__)
 

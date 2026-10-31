@@ -9,10 +9,10 @@ import pytest
 from aiogram import Bot
 from aiogram.types import Message
 
-from immich_tg_bot.bot import _extract_ingest_item
-from immich_tg_bot.config import Settings
-from immich_tg_bot.pipeline import IngestionPipeline, IngestItem
-from immich_tg_bot.state import State
+from immich_chat_importer.adapters.telegram.bot import _extract_ingest_item
+from immich_chat_importer.config import Settings
+from immich_chat_importer.pipeline import IngestionPipeline, IngestItem
+from immich_chat_importer.state import State
 
 
 @pytest.mark.parametrize(
@@ -29,7 +29,7 @@ async def test_upload_image_carries_local_capture_date_sidecar(
     import httpx
     from PIL import Image
 
-    from immich_tg_bot.runtime import ingestion_runtime
+    from immich_chat_importer.runtime import ingestion_runtime
 
     photo = tmp_path / "photo.jpg"
     exif = Image.Exif()
@@ -47,7 +47,7 @@ async def test_upload_image_carries_local_capture_date_sidecar(
         return httpx.Response(201, json={"id": "asset", "status": "created"})
 
     monkeypatch.setattr(
-        "immich_tg_bot.immich.httpx.AsyncClient",
+        "immich_chat_importer.immich.httpx.AsyncClient",
         lambda **kw: original(**kw, transport=httpx.MockTransport(upload)),
     )
     settings = Settings.model_construct(
@@ -261,7 +261,7 @@ async def test_archive_assets_survive_album_lookup_failure_and_restart(
         (dest / "a.jpg").write_bytes(b"a")
         (dest / "b.jpg").write_bytes(b"b")
 
-    monkeypatch.setattr("immich_tg_bot.pipeline.extract", extract_files)
+    monkeypatch.setattr("immich_chat_importer.pipeline.extract", extract_files)
     archive = tmp_path / "bundle.zip"
     archive.write_bytes(b"archive")
     fake_immich.upload_asset.side_effect = [
@@ -359,7 +359,7 @@ async def test_archive_member_identity_survives_reordering_and_renaming(
             path.parent.mkdir(exist_ok=True)
             path.write_bytes(content)
 
-    monkeypatch.setattr("immich_tg_bot.pipeline.extract", extract_files)
+    monkeypatch.setattr("immich_chat_importer.pipeline.extract", extract_files)
     identities: dict[bytes, str] = {}
 
     async def fail_upload(**kwargs: Any) -> None:
@@ -618,7 +618,7 @@ async def test_ingest_archive_extracts_and_uploads_media(
         (dest / "photo2.png").write_bytes(b"content 2")
         (dest / "readme.txt").write_bytes(b"skip me")
 
-    monkeypatch.setattr("immich_tg_bot.pipeline.extract", fake_extract)
+    monkeypatch.setattr("immich_chat_importer.pipeline.extract", fake_extract)
 
     fake_immich.upload_asset.side_effect = [
         {"id": "asset-1", "status": "created"},
@@ -646,7 +646,7 @@ async def test_ingest_archive_extract_failure_records_error(
     async def fail_extract(archive: Path, dest: Path) -> None:
         raise RuntimeError("Corrupt archive data")
 
-    monkeypatch.setattr("immich_tg_bot.pipeline.extract", fail_extract)
+    monkeypatch.setattr("immich_chat_importer.pipeline.extract", fail_extract)
 
     pipeline = IngestionPipeline(immich=fake_immich, state=state)
     item = IngestItem(1001, 2001, corrupt_zip, "corrupt.zip", datetime.now(UTC))
@@ -668,7 +668,7 @@ async def test_ingest_archive_with_no_media_reports_skip(
     async def fake_extract(archive: Path, dest: Path) -> None:
         (dest / "readme.txt").write_bytes(b"no photos here")
 
-    monkeypatch.setattr("immich_tg_bot.pipeline.extract", fake_extract)
+    monkeypatch.setattr("immich_chat_importer.pipeline.extract", fake_extract)
 
     pipeline = IngestionPipeline(immich=fake_immich, state=state)
     item = IngestItem(1001, 2001, empty_zip, "empty.zip", datetime.now(UTC))
@@ -715,7 +715,7 @@ async def test_ingest_archive_partial_failure_allows_safe_retry(
         (dest / "photo1.jpg").write_bytes(b"content 1")
         (dest / "photo2.jpg").write_bytes(b"content 2")
 
-    monkeypatch.setattr("immich_tg_bot.pipeline.extract", fake_extract)
+    monkeypatch.setattr("immich_chat_importer.pipeline.extract", fake_extract)
 
     # 第一次尝试：photo1 成功，photo2 失败
     fake_immich.upload_asset.side_effect = [
@@ -914,7 +914,7 @@ async def test_ingest_archive_cleans_up_archive_file_on_success(
     async def fake_extract(archive: Path, dest: Path) -> None:
         (dest / "photo.jpg").write_bytes(b"jpeg bytes")
 
-    monkeypatch.setattr("immich_tg_bot.pipeline.extract", fake_extract)
+    monkeypatch.setattr("immich_chat_importer.pipeline.extract", fake_extract)
 
     pipeline = IngestionPipeline(immich=fake_immich, state=state, cleanup_local=True)
     item = IngestItem(

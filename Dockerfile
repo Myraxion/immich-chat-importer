@@ -31,8 +31,8 @@ ENV PYTHONUNBUFFERED=1 \
     TELEGRAM_API_BASE=http://telegram-bot-api:8081
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-    CMD python -m immich_tg_bot.healthcheck || exit 1
+    CMD python -m immich_chat_importer.healthcheck || exit 1
 
 ENTRYPOINT ["tini", "--"]
-CMD ["python", "-m", "immich_tg_bot"]
+CMD ["python", "-m", "immich_chat_importer"]
 

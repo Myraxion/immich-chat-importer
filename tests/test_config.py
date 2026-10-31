@@ -1,6 +1,6 @@
 import pytest
 
-from immich_tg_bot.config import Settings
+from immich_chat_importer.config import Settings
 
 
 @pytest.fixture

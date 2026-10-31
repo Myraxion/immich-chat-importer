@@ -111,23 +111,23 @@ flowchart LR
 
 | 代码位置 | 已有能力 | 扩展判断 |
 | --- | --- | --- |
-| [`pipeline.py`](../../src/immich_tg_bot/pipeline.py) | `IngestItem` 接受本地文件；统一上传、EXIF 日期回退、SHA-1 去重、解压、相册归组和清理；返回 `IngestSummary` | 可复用主流程，但身份语义必须调整。 |
-| [`immich.py`](../../src/immich_tg_bot/immich.py) | 异步 Immich 上传、查建相册、关联资产 | 与 Telegram 无关，可直接复用。 |
-| [`archives.py`](../../src/immich_tg_bot/archives.py)、[`Dockerfile`](../../Dockerfile) | `bsdtar` 解压 ZIP/RAR/7z/tar 等，筛选已列举的图片/视频格式；镜像已安装工具 | 压缩包导入应沿用“展开其中媒体”，不把压缩文件作为 Immich 媒体上传；具体媒体能否接受最终仍取决于目标 Immich。 |
-| [`naming.py`](../../src/immich_tg_bot/naming.py) | `MessageMetadata`、模板渲染、文件名整理、动态相册 | 渲染部分可复用；`extract_metadata()` 和模块导入依赖 aiogram，需将 Telegram 提取与通用模板职责分开。 |
-| [`state.py`](../../src/immich_tg_bot/state.py) | SQLite 消息记录和 SHA-1 缓存 | 内容缓存可继续复用；完成记录应支持来源和附件身份。 |
+| [`pipeline.py`](../../src/immich_chat_importer/pipeline.py) | `IngestItem` 接受本地文件；统一上传、EXIF 日期回退、SHA-1 去重、解压、相册归组和清理；返回 `IngestSummary` | 可复用主流程，但身份语义必须调整。 |
+| [`immich.py`](../../src/immich_chat_importer/immich.py) | 异步 Immich 上传、查建相册、关联资产 | 与 Telegram 无关，可直接复用。 |
+| [`archives.py`](../../src/immich_chat_importer/archives.py)、[`Dockerfile`](../../Dockerfile) | `bsdtar` 解压 ZIP/RAR/7z/tar 等，筛选已列举的图片/视频格式；镜像已安装工具 | 压缩包导入应沿用“展开其中媒体”，不把压缩文件作为 Immich 媒体上传；具体媒体能否接受最终仍取决于目标 Immich。 |
+| [`naming.py`](../../src/immich_chat_importer/naming.py) | `MessageMetadata`、模板渲染、文件名整理、动态相册 | 渲染部分可复用；`extract_metadata()` 和模块导入依赖 aiogram，需将 Telegram 提取与通用模板职责分开。 |
+| [`state.py`](../../src/immich_chat_importer/state.py) | SQLite 消息记录和 SHA-1 缓存 | 内容缓存可继续复用；完成记录应支持来源和附件身份。 |
 
 这延续 [ADR-0001](../adr/0001-consolidate-ingestion-pipeline.md) 的“薄传输适配层 + 摄取流水线”，以及 [ADR-0002](../adr/0002-dynamic-naming-and-album-routing.md) 的标准化元数据边界；不需要推翻已有决策。Discord 语言可从 interaction locale 解析，普通私信消息没有同等的发送者语言字段时使用默认语言；不应直接照搬 Telegram 的 `from_user.language_code`。[Discord interaction locale](https://docs.discord.com/developers/interactions/receiving-and-responding#interaction-object)、[当前 Telegram 本地化决策](../adr/0003-telegram-native-localization.md)
 
 ## 必须修改的边界
 
-1. **按附件记录完成状态。** [`IngestItem`](../../src/immich_tg_bot/pipeline.py) 没有附件标识；`_ingest_item()` 先查 `(chat_id, message_id)`，成功后总是以 `file_index=0` 标记完成。同一条 Discord 消息的两个不同附件依次进入时，第一个成功后，第二个会在内容哈希前被判重复。这是代码路径推导，尚未运行复现。应使用“来源 + 频道/消息 + 稳定附件 ID”的身份，不使用右键 interaction ID，才能让私信自动导入与之后右键保存同一消息正确去重。数据库已有 `file_index`，但流水线目前未使用它区分文件；具体复用字段还是迁移表结构在实施时决定。
+1. **按附件记录完成状态。** [`IngestItem`](../../src/immich_chat_importer/pipeline.py) 没有附件标识；`_ingest_item()` 先查 `(chat_id, message_id)`，成功后总是以 `file_index=0` 标记完成。同一条 Discord 消息的两个不同附件依次进入时，第一个成功后，第二个会在内容哈希前被判重复。这是代码路径推导，尚未运行复现。应使用“来源 + 频道/消息 + 稳定附件 ID”的身份，不使用右键 interaction ID，才能让私信自动导入与之后右键保存同一消息正确去重。数据库已有 `file_index`，但流水线目前未使用它区分文件；具体复用字段还是迁移表结构在实施时决定。
 2. **去掉写死的 Telegram 身份。** `pipeline.py` 的资产前缀是 `telegram:{chat_id}:{message_id}`。Discord 应有自己的来源前缀和附件身份；压缩包中条目的资产标识还需包含所属附件。Telegram 已有身份及历史完成记录需保持兼容，不能因通用化而全部失效。默认 device ID 的项目名属于命名问题，来源身份与去重正确性才是必要改动。
-3. **允许 Discord 独立运行。** [`config.py`](../../src/immich_tg_bot/config.py) 强制要求 Telegram token、API ID/hash；[`__main__.py`](../../src/immich_tg_bot/__main__.py) 仅启动 Telegram；[`docker-compose.yml`](../../docker-compose.yml) 强制依赖 Telegram Bot API；[`healthcheck.py`](../../src/immich_tg_bot/healthcheck.py) 也加载同一配置。需按启用平台验证配置，让用户可运行 Telegram、Discord 或两者。仅 Discord 模式不需要 Telegram Bot API 容器。
+3. **允许 Discord 独立运行。** [`config.py`](../../src/immich_chat_importer/config.py) 强制要求 Telegram token、API ID/hash；[`__main__.py`](../../src/immich_chat_importer/__main__.py) 仅启动 Telegram；[`docker-compose.yml`](../../docker-compose.yml) 强制依赖 Telegram Bot API；[`healthcheck.py`](../../src/immich_chat_importer/healthcheck.py) 也加载同一配置。需按启用平台验证配置，让用户可运行 Telegram、Discord 或两者。仅 Discord 模式不需要 Telegram Bot API 容器。
 4. **为 Discord 下载文件。** Telegram 当前通过共享卷取得本地路径，Discord 需要把附件 URL 流式下载到临时目录，再构造 `IngestItem`。保存原始文件名/扩展名，独立计算模板元数据；失败与重复情况均需正确清理。`MAX_ARCHIVE_MB` 目前只在配置中定义，代码没有实际执行该大小限制，不能当作现成保护；Discord 下载器应实际检查声明大小和下载字节数。
 5. **明确资源与回复的归属。** 当前 `run_bot()` 自己创建并关闭 `State`、`ImmichClient`，Telegram polling 负责信号处理。若同时启动两个适配层，需要由共同入口协调停止和资源关闭。Discord 菜单先 defer，再回报 `IngestSummary`；鉴权检查调用者的独立 Discord ID 白名单，不能共用未区分平台的 Telegram ID 白名单。
 
-当前流水线只把新上传资产加入相册，SHA-1 命中不会把已有资产加入另一个目标相册；相册关联失败只写日志，不增加 `IngestSummary.errors`。Q11 已确认需要改变这些行为，使相册归属与错误反馈符合“保存到本次目标相册”的含义，见 [ADR-0004](../adr/0004-cross-platform-ingestion-identity-and-completion.md)。[pipeline.py](../../src/immich_tg_bot/pipeline.py)、[现有相册失败测试](../../tests/test_pipeline.py)
+当前流水线只把新上传资产加入相册，SHA-1 命中不会把已有资产加入另一个目标相册；相册关联失败只写日志，不增加 `IngestSummary.errors`。Q11 已确认需要改变这些行为，使相册归属与错误反馈符合“保存到本次目标相册”的含义，见 [ADR-0004](../adr/0004-cross-platform-ingestion-identity-and-completion.md)。[pipeline.py](../../src/immich_chat_importer/pipeline.py)、[现有相册失败测试](../../tests/test_pipeline.py)
 
 ## 建议的最小接入范围与验证顺序
 

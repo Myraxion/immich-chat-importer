@@ -12,16 +12,16 @@ import discord
 import httpx
 from discord import app_commands
 
-from .archives import is_archive, is_media
-from .batches import IngestBatches, IngestRequest, Preparation
-from .config import Settings
-from .errors import failure_kind, format_failure
-from .i18n import resolve_language, t
-from .media_metadata import inspect_media
-from .naming import MessageMetadata, resolve_album_name, resolve_filename, split_filename
-from .pipeline import IngestionPipeline, IngestItem
-from .retry import retry
-from .runtime import ingestion_runtime
+from ...archives import is_archive, is_media
+from ...batches import IngestBatches, IngestRequest, Preparation
+from ...config import Settings
+from ...errors import failure_kind, format_failure
+from ...i18n import resolve_language, t
+from ...media_metadata import inspect_media
+from ...naming import MessageMetadata, resolve_album_name, resolve_filename, split_filename
+from ...pipeline import IngestionPipeline, IngestItem
+from ...retry import retry
+from ...runtime import ingestion_runtime
 
 log = logging.getLogger(__name__)
 

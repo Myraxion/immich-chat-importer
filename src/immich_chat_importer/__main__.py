@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from .bot import run_bot
+from .adapters.telegram.bot import run_bot
 from .config import Settings
 from .runtime import ingestion_runtime
 
@@ -11,11 +11,11 @@ async def run(settings: Settings) -> None:
         if set(settings.enabled_platforms) == {"telegram"}:
             await run_bot(settings, pipeline)
         elif set(settings.enabled_platforms) == {"discord"}:
-            from .discord_bot import run_discord
+            from .adapters.discord.bot import run_discord
 
             await run_discord(settings, pipeline)
         else:
-            from .discord_bot import run_discord
+            from .adapters.discord.bot import run_discord
 
             tasks = [
                 asyncio.create_task(run_bot(settings, pipeline)),

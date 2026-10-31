@@ -4,9 +4,9 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from immich_tg_bot.config import Settings
-from immich_tg_bot.discord_bot import handle_dm
-from immich_tg_bot.runtime import ingestion_runtime
+from immich_chat_importer.config import Settings
+from immich_chat_importer.adapters.discord.bot import handle_dm
+from immich_chat_importer.runtime import ingestion_runtime
 
 
 @pytest.mark.parametrize(
@@ -17,11 +17,11 @@ from immich_tg_bot.runtime import ingestion_runtime
     ],
 )
 async def test_discord_status_uses_configured_timezone(monkeypatch, tz, expected):
-    from immich_tg_bot.discord_bot import handle_status
-    from immich_tg_bot.state import State
+    from immich_chat_importer.adapters.discord.bot import handle_status
+    from immich_chat_importer.state import State
 
     monkeypatch.setenv("TZ", tz)
-    monkeypatch.setattr("immich_tg_bot.state._timestamp", lambda: "2026-10-31 19:14:23")
+    monkeypatch.setattr("immich_chat_importer.state._timestamp", lambda: "2026-10-31 19:14:23")
     settings = Settings(
         _env_file=None,
         enabled_platforms=["discord"],
@@ -51,7 +51,7 @@ async def test_discord_status_uses_configured_timezone(monkeypatch, tz, expected
 async def test_forwarded_attachments_are_imported(tmp_path, monkeypatch, entrypoint, channel_name):
     import discord
 
-    from immich_tg_bot.discord_bot import handle_menu
+    from immich_chat_importer.adapters.discord.bot import handle_menu
 
     uploads = []
     downloads = []
@@ -63,7 +63,7 @@ async def test_forwarded_attachments_are_imported(tmp_path, monkeypatch, entrypo
         return httpx.Response(201, json={"id": str(len(uploads)), "status": "created"})
 
     monkeypatch.setattr(
-        "immich_tg_bot.immich.httpx.AsyncClient",
+        "immich_chat_importer.immich.httpx.AsyncClient",
         lambda **kw: original(**kw, transport=httpx.MockTransport(immich)),
     )
     snapshot = discord.MessageSnapshot(
@@ -173,7 +173,7 @@ async def test_dm_imports_all_attachments_and_reports_skipped(tmp_path, monkeypa
 
     original = httpx.AsyncClient
     monkeypatch.setattr(
-        "immich_tg_bot.immich.httpx.AsyncClient",
+        "immich_chat_importer.immich.httpx.AsyncClient",
         lambda **kw: original(**kw, transport=httpx.MockTransport(immich)),
     )
     settings = Settings.model_construct(
@@ -215,7 +215,7 @@ async def test_dm_imports_all_attachments_and_reports_skipped(tmp_path, monkeypa
     ) as client:
         async with ingestion_runtime(settings) as pipeline:
             await handle_dm(message, settings, pipeline, client)
-            from immich_tg_bot.discord_bot import handle_status
+            from immich_chat_importer.adapters.discord.bot import handle_status
 
             status_replies = []
 
@@ -263,7 +263,7 @@ async def test_limits_and_failed_download_do_not_stop_other_attachments(tmp_path
         return httpx.Response(200, json={"id": "album"})
 
     monkeypatch.setattr(
-        "immich_tg_bot.immich.httpx.AsyncClient",
+        "immich_chat_importer.immich.httpx.AsyncClient",
         lambda **kw: original(**kw, transport=httpx.MockTransport(immich)),
     )
 
@@ -331,12 +331,12 @@ async def test_limits_and_failed_download_do_not_stop_other_attachments(tmp_path
 async def test_menu_private_response_uses_original_author_and_context(
     tmp_path, guild_id, guild_name, channel_name, source
 ):
-    from immich_tg_bot.discord_bot import handle_menu
-    from immich_tg_bot.pipeline import IngestSummary
+    from immich_chat_importer.adapters.discord.bot import handle_menu
+    from immich_chat_importer.pipeline import IngestSummary
 
     events = []
 
-    from immich_tg_bot.state import State
+    from immich_chat_importer.state import State
 
     state = State()
 
@@ -389,7 +389,7 @@ async def test_menu_private_response_uses_original_author_and_context(
 
 
 async def test_menu_denies_caller_even_when_author_is_allowed(tmp_path):
-    from immich_tg_bot.discord_bot import handle_menu
+    from immich_chat_importer.adapters.discord.bot import handle_menu
 
     events = []
 
@@ -441,7 +441,7 @@ async def test_dm_imports_real_archive(tmp_path, monkeypatch):
         return httpx.Response(200, json={"id": "album"})
 
     monkeypatch.setattr(
-        "immich_tg_bot.immich.httpx.AsyncClient",
+        "immich_chat_importer.immich.httpx.AsyncClient",
         lambda **kw: original(**kw, transport=httpx.MockTransport(immich)),
     )
 
@@ -484,7 +484,7 @@ async def test_dm_imports_real_archive(tmp_path, monkeypatch):
 async def test_status_remains_responsive_during_upload_and_waiting_batch(tmp_path, monkeypatch):
     import asyncio
 
-    from immich_tg_bot.discord_bot import handle_status
+    from immich_chat_importer.adapters.discord.bot import handle_status
 
     entered = asyncio.Event()
     release = asyncio.Event()
@@ -498,7 +498,7 @@ async def test_status_remains_responsive_during_upload_and_waiting_batch(tmp_pat
         return httpx.Response(200, json=[])
 
     monkeypatch.setattr(
-        "immich_tg_bot.immich.httpx.AsyncClient",
+        "immich_chat_importer.immich.httpx.AsyncClient",
         lambda **kw: original(**kw, transport=httpx.MockTransport(immich)),
     )
     settings = Settings.model_construct(
@@ -559,8 +559,8 @@ async def test_status_remains_responsive_during_upload_and_waiting_batch(tmp_pat
 
 
 async def test_status_denies_unlisted_users_and_reports_empty_history(tmp_path):
-    from immich_tg_bot.discord_bot import handle_status
-    from immich_tg_bot.state import State
+    from immich_chat_importer.adapters.discord.bot import handle_status
+    from immich_chat_importer.state import State
 
     state = State()
     record = await state.create_ingest_record(42, "20", "secret")
@@ -590,7 +590,7 @@ async def test_expired_menu_reply_keeps_upload_and_status(tmp_path, monkeypatch)
 
     import discord
 
-    from immich_tg_bot.discord_bot import handle_menu, handle_status
+    from immich_chat_importer.adapters.discord.bot import handle_menu, handle_status
 
     entered, release = asyncio.Event(), asyncio.Event()
     original = httpx.AsyncClient
@@ -603,7 +603,7 @@ async def test_expired_menu_reply_keeps_upload_and_status(tmp_path, monkeypatch)
         return httpx.Response(200, json=[])
 
     monkeypatch.setattr(
-        "immich_tg_bot.immich.httpx.AsyncClient",
+        "immich_chat_importer.immich.httpx.AsyncClient",
         lambda **kw: original(**kw, transport=httpx.MockTransport(immich)),
     )
     settings = Settings.model_construct(
@@ -679,7 +679,7 @@ async def test_expired_menu_reply_keeps_upload_and_status(tmp_path, monkeypatch)
 async def test_restart_does_not_replay_and_manual_retry_finishes_album(tmp_path, monkeypatch):
     import asyncio
 
-    from immich_tg_bot.discord_bot import handle_menu, handle_status
+    from immich_chat_importer.adapters.discord.bot import handle_menu, handle_status
 
     album_entered = asyncio.Event()
     calls = []
@@ -706,7 +706,7 @@ async def test_restart_does_not_replay_and_manual_retry_finishes_album(tmp_path,
         return httpx.Response(200, content=b"photo")
 
     monkeypatch.setattr(
-        "immich_tg_bot.immich.httpx.AsyncClient",
+        "immich_chat_importer.immich.httpx.AsyncClient",
         lambda **kw: original(**kw, transport=httpx.MockTransport(immich)),
     )
     settings = Settings.model_construct(

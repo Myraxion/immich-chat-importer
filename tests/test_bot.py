@@ -5,13 +5,13 @@ from typing import Any, cast
 import pytest
 from aiogram import Bot
 
-from immich_tg_bot.bot import _resolve_local_path
+from immich_chat_importer.adapters.telegram.bot import _resolve_local_path
 
 
 @pytest.mark.asyncio
 async def test_telegram_status_only_shows_callers_telegram_records():
-    from immich_tg_bot.bot import handle_telegram_status
-    from immich_tg_bot.state import State
+    from immich_chat_importer.adapters.telegram.bot import handle_telegram_status
+    from immich_chat_importer.state import State
 
     state = State()
     record_id = await state.create_ingest_record(42, "1", "own", platform="telegram")
@@ -30,8 +30,8 @@ async def test_telegram_status_only_shows_callers_telegram_records():
     )
     from unittest.mock import AsyncMock
 
-    from immich_tg_bot.batches import IngestBatches
-    from immich_tg_bot.pipeline import IngestionPipeline
+    from immich_chat_importer.batches import IngestBatches
+    from immich_chat_importer.pipeline import IngestionPipeline
 
     await handle_telegram_status(
         message, IngestBatches(IngestionPipeline(AsyncMock(), state)), "en"
@@ -52,12 +52,12 @@ async def test_telegram_status_only_shows_callers_telegram_records():
 async def test_telegram_status_uses_configured_timezone(tmp_path, monkeypatch, tz, expected):
     from aiogram import Dispatcher
 
-    from immich_tg_bot.bot import run_bot
-    from immich_tg_bot.config import Settings
-    from immich_tg_bot.state import State
+    from immich_chat_importer.adapters.telegram.bot import run_bot
+    from immich_chat_importer.config import Settings
+    from immich_chat_importer.state import State
 
     monkeypatch.setenv("TZ", tz)
-    monkeypatch.setattr("immich_tg_bot.state._timestamp", lambda: "2026-10-31 19:14:23")
+    monkeypatch.setattr("immich_chat_importer.state._timestamp", lambda: "2026-10-31 19:14:23")
     settings = Settings(
         _env_file=None,
         immich_url="https://immich.test",
@@ -118,7 +118,7 @@ async def test_resolve_local_path_uses_per_bot_directory(tmp_path: Path) -> None
 async def test_extract_ingest_item_from_document(tmp_path: Path) -> None:
     from datetime import UTC, datetime
 
-    from immich_tg_bot.bot import _extract_ingest_item
+    from immich_chat_importer.adapters.telegram.bot import _extract_ingest_item
 
     token = "test_bot"
     doc_path = tmp_path / token / "docs" / "vacation.zip"
@@ -150,7 +150,7 @@ async def test_extract_ingest_item_from_document(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_extract_ingest_item_returns_none_for_text_message(tmp_path: Path) -> None:
-    from immich_tg_bot.bot import _extract_ingest_item
+    from immich_chat_importer.adapters.telegram.bot import _extract_ingest_item
 
     bot = cast(Bot, FakeBot("test_bot", None))
     msg = SimpleNamespace(
@@ -173,8 +173,8 @@ async def test_extract_ingest_item_returns_none_for_text_message(tmp_path: Path)
 async def test_extract_ingest_item_from_photo_uses_dynamic_naming(tmp_path: Path) -> None:
     from datetime import UTC, datetime
 
-    from immich_tg_bot.bot import _extract_ingest_item
-    from immich_tg_bot.config import Settings
+    from immich_chat_importer.adapters.telegram.bot import _extract_ingest_item
+    from immich_chat_importer.config import Settings
 
     token = "test_bot"
     photo_path = tmp_path / token / "photos" / "file_0.jpg"
@@ -233,8 +233,8 @@ async def test_extract_ingest_item_preserves_media_extension(
 ) -> None:
     from aiogram.types import Message
 
-    from immich_tg_bot.bot import _extract_ingest_item
-    from immich_tg_bot.config import Settings
+    from immich_chat_importer.adapters.telegram.bot import _extract_ingest_item
+    from immich_chat_importer.config import Settings
 
     cached = tmp_path / cached_name
     cached.touch()
@@ -266,8 +266,8 @@ async def test_extract_ingest_item_preserves_media_extension(
 
 
 def test_format_summary_reply_languages() -> None:
-    from immich_tg_bot.bot import format_summary_reply
-    from immich_tg_bot.pipeline import IngestSummary
+    from immich_chat_importer.adapters.telegram.bot import format_summary_reply
+    from immich_chat_importer.pipeline import IngestSummary
 
     # 1. uploaded only
     s1 = IngestSummary(uploaded=3, duplicates=0, errors=0)
@@ -307,8 +307,8 @@ def test_format_summary_reply_languages() -> None:
 
 
 def test_summary_reply_includes_escaped_stage_and_file_context() -> None:
-    from immich_tg_bot.bot import format_summary_reply
-    from immich_tg_bot.pipeline import IngestSummary
+    from immich_chat_importer.adapters.telegram.bot import format_summary_reply
+    from immich_chat_importer.pipeline import IngestSummary
 
     summary = IngestSummary(
         uploaded=1, errors=1, error_messages=["photo<1>.jpg: album association: unavailable"]
@@ -320,8 +320,8 @@ def test_summary_reply_includes_escaped_stage_and_file_context() -> None:
 
 
 def test_large_summary_is_split_into_valid_telegram_messages() -> None:
-    from immich_tg_bot.bot import format_summary_replies
-    from immich_tg_bot.pipeline import IngestSummary
+    from immich_chat_importer.adapters.telegram.bot import format_summary_replies
+    from immich_chat_importer.pipeline import IngestSummary
 
     errors = [f"photo-{i}.jpg: album association: unavailable" for i in range(300)]
     replies = format_summary_replies(IngestSummary(uploaded=300, errors=300, error_messages=errors))
@@ -347,8 +347,8 @@ async def test_extract_ingest_item_preserves_document_extension(
 ) -> None:
     from aiogram.types import Message
 
-    from immich_tg_bot.bot import _extract_ingest_item
-    from immich_tg_bot.config import Settings
+    from immich_chat_importer.adapters.telegram.bot import _extract_ingest_item
+    from immich_chat_importer.config import Settings
 
     cached = tmp_path / "file_0"
     cached.touch()
@@ -384,11 +384,11 @@ async def test_telegram_media_import_records_result_before_reply(tmp_path, monke
     from aiogram import Bot, Dispatcher
     from aiogram.types import File, Message
 
-    from immich_tg_bot.batches import IngestBatches
-    from immich_tg_bot.bot import run_bot
-    from immich_tg_bot.config import Settings
-    from immich_tg_bot.pipeline import IngestionPipeline
-    from immich_tg_bot.state import State
+    from immich_chat_importer.batches import IngestBatches
+    from immich_chat_importer.adapters.telegram.bot import run_bot
+    from immich_chat_importer.config import Settings
+    from immich_chat_importer.pipeline import IngestionPipeline
+    from immich_chat_importer.state import State
 
     photo = tmp_path / "photo.jpg"
     photo.write_bytes(b"image")

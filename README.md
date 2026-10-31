@@ -141,10 +141,10 @@ docker compose logs -f immich-chat-importer
 On a clean start you should see something like:
 
 ```log
-INFO immich_tg_bot.bot: Using Immich album 'Telegram Inbox' (id=...)
-INFO immich_tg_bot.bot: Bot starting (allowed users: [...], album: Telegram Inbox, immich: ...)
+INFO immich_chat_importer.adapters.telegram.bot: Using Immich album 'Telegram Inbox' (id=...)
+INFO immich_chat_importer.adapters.telegram.bot: Bot starting (allowed users: [...], album: Telegram Inbox, immich: ...)
 # If Discord is enabled:
-INFO immich_tg_bot.discord_bot: Discord bot starting (allowed users: [...], album: Discord Inbox, immich: ...)
+INFO immich_chat_importer.adapters.discord.bot: Discord bot starting (allowed users: [...], album: Discord Inbox, immich: ...)
 ```
 
 ### 5. How to use

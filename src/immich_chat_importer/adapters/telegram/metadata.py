@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 from aiogram.types import Message
 
-from .naming import MessageMetadata, split_filename
+from ...naming import MessageMetadata, split_filename
 
 
 def _extract_chat_info(chat: Any) -> tuple[str, str, str]:

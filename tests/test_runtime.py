@@ -5,13 +5,13 @@ from pathlib import Path
 import httpx
 import pytest
 
-from immich_tg_bot.config import Settings
-from immich_tg_bot.pipeline import IngestItem
-from immich_tg_bot.runtime import ingestion_runtime
+from immich_chat_importer.config import Settings
+from immich_chat_importer.pipeline import IngestItem
+from immich_chat_importer.runtime import ingestion_runtime
 
 
 async def test_combined_runtime_stops_both_adapters_together(tmp_path, monkeypatch):
-    from immich_tg_bot.__main__ import run
+    from immich_chat_importer.__main__ import run
 
     started = asyncio.Event()
     stopped = asyncio.Event()
@@ -29,8 +29,8 @@ async def test_combined_runtime_stops_both_adapters_together(tmp_path, monkeypat
         finally:
             stopped.set()
 
-    monkeypatch.setattr("immich_tg_bot.__main__.run_bot", telegram)
-    monkeypatch.setattr("immich_tg_bot.discord_bot.run_discord", discord)
+    monkeypatch.setattr("immich_chat_importer.__main__.run_bot", telegram)
+    monkeypatch.setattr("immich_chat_importer.adapters.discord.bot.run_discord", discord)
     settings = Settings.model_construct(
         data_dir=tmp_path,
         telegram_album_name=None,
@@ -79,7 +79,7 @@ async def test_runtime_opens_shared_ingestion_and_closes_immich_on_error(
         clients.append(client)
         return client
 
-    monkeypatch.setattr("immich_tg_bot.immich.httpx.AsyncClient", make_client)
+    monkeypatch.setattr("immich_chat_importer.immich.httpx.AsyncClient", make_client)
     settings = Settings.model_construct(
         data_dir=tmp_path,
         telegram_album_name=None,
@@ -112,7 +112,7 @@ async def test_discord_without_album_does_not_use_telegram_album(tmp_path, monke
     def make_client(**kwargs):
         return client_class(**kwargs, transport=httpx.MockTransport(handle))
 
-    monkeypatch.setattr("immich_tg_bot.immich.httpx.AsyncClient", make_client)
+    monkeypatch.setattr("immich_chat_importer.immich.httpx.AsyncClient", make_client)
     settings = Settings.model_construct(
         data_dir=tmp_path,
         telegram_album_name="Telegram Inbox",

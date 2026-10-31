@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from immich_tg_bot.pipeline import IngestionPipeline, IngestItem
-from immich_tg_bot.state import State
+from immich_chat_importer.pipeline import IngestionPipeline, IngestItem
+from immich_chat_importer.state import State
 
 
 async def test_archive_input_limit_rejects_before_extraction(tmp_path):
@@ -25,8 +25,8 @@ async def test_discord_cancelled_download_removes_all_temporary_files(tmp_path):
     import httpx
     import pytest
 
-    from immich_tg_bot.config import Settings
-    from immich_tg_bot.discord_bot import process_import
+    from immich_chat_importer.config import Settings
+    from immich_chat_importer.adapters.discord.bot import process_import
 
     entered = asyncio.Event()
 
@@ -65,8 +65,8 @@ async def test_telegram_shared_media_and_shutdown(tmp_path, monkeypatch, stop_du
     from aiogram import Bot, Dispatcher
     from aiogram.types import File, Message
 
-    from immich_tg_bot.bot import run_bot
-    from immich_tg_bot.config import Settings
+    from immich_chat_importer.adapters.telegram.bot import run_bot
+    from immich_chat_importer.config import Settings
 
     source = tmp_path / "shared.jpg"
     source.write_bytes(b"image")
@@ -77,7 +77,7 @@ async def test_telegram_shared_media_and_shutdown(tmp_path, monkeypatch, stop_du
             return_value=File(file_id="file", file_unique_id="unique", file_path=str(source))
         ),
     )
-    monkeypatch.setattr("immich_tg_bot.bot._MEDIA_GROUP_DEBOUNCE", 0.01)
+    monkeypatch.setattr("immich_chat_importer.adapters.telegram.bot._MEDIA_GROUP_DEBOUNCE", 0.01)
     entered, finished, replied = asyncio.Event(), asyncio.Event(), asyncio.Event()
     immich = AsyncMock()
     uploads = []

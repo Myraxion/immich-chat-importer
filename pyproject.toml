@@ -39,8 +39,8 @@ Homepage = "https://github.com/myraxion/immich-chat-importer"
 Issues = "https://github.com/myraxion/immich-chat-importer/issues"
 
 [project.scripts]
-immich-chat-importer = "immich_tg_bot.__main__:main"
-immich-telegram-bot = "immich_tg_bot.__main__:main"
+immich-chat-importer = "immich_chat_importer.__main__:main"
+immich-telegram-bot = "immich_chat_importer.__main__:main"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

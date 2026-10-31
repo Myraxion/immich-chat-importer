@@ -141,10 +141,10 @@ docker compose logs -f immich-chat-importer
 正常启动时，日志输出大致如下：
 
 ```log
-INFO immich_tg_bot.bot: Using Immich album 'Telegram Inbox' (id=...)
-INFO immich_tg_bot.bot: Bot starting (allowed users: [...], album: Telegram Inbox, immich: ...)
+INFO immich_chat_importer.adapters.telegram.bot: Using Immich album 'Telegram Inbox' (id=...)
+INFO immich_chat_importer.adapters.telegram.bot: Bot starting (allowed users: [...], album: Telegram Inbox, immich: ...)
 # 若启用了 Discord:
-INFO immich_tg_bot.discord_bot: Discord bot starting (allowed users: [...], album: Discord Inbox, immich: ...)
+INFO immich_chat_importer.adapters.discord.bot: Discord bot starting (allowed users: [...], album: Discord Inbox, immich: ...)
 ```
 
 ### 5. 使用说明
