@@ -155,6 +155,38 @@ All settings are read from `.env`. Telegram-specific required values apply only 
 
 The bottom three rarely need to change — they match the default `docker-compose.yml`.
 
+## Discord naming templates
+
+`.env.example` sets `DISCORD_FILENAME_TEMPLATE` to `{source}_{sender}_{message_id}_{index}`. If the setting is omitted, the application defaults to `{original_name}`, preserving the attachment's original name. The template produces the name without its extension; the original extension is appended automatically. Media extracted from an archive keeps its entry filename instead of using this template.
+
+`DISCORD_ALBUM_NAME_TEMPLATE` uses the same variables to choose an album. It defaults to empty, which uses `DISCORD_ALBUM_NAME` (default: `Discord Inbox`); an empty or invalid rendered album name also falls back to that setting.
+
+| Variable | Discord value |
+|---|---|
+| `{original_name}` | Original attachment filename without its extension. |
+| `{sender}` | Original message author's display name, falling back to their username or ID. |
+| `{sender_id}`, `{source_id}` | Original message author's user ID. |
+| `{source_username}`, `{username}` | Original message author's username, falling back to their ID. |
+| `{source}`, `{chat_title}` | `server_channel` in a server; the author's display name in a private conversation. |
+| `{chat_id}` | Channel ID of the original message. |
+| `{message_id}`, `{msg_id}` | Original message ID. |
+| `{index}` | Attachment position in the message, starting at 1. |
+| `{date}`, `{msg_date}` | Original message time, in the timezone configured by `TZ` (default `UTC`). |
+| `{exif_date}` | Attachment EXIF time in `TZ`, or empty if unavailable. |
+| `{media_type}` | `video` when the filename's MIME type is video; otherwise `photo`. |
+| `{file_unique_id}` | Discord attachment ID. |
+| `{caption}` | Original message text. |
+
+`{forward_date}`, `{media_group_id}`, `{forward_source}`, `{forward_channel}`, `{forward_author}`, `{forward_source_id}`, and `{forward_msg_id}` are empty for Discord imports. Unknown variables also render as empty. Date variables support Python date formatting, for example:
+
+```env
+TZ=Asia/Shanghai
+DISCORD_FILENAME_TEMPLATE={sender}_{date:%Y%m%d}_{original_name}
+DISCORD_ALBUM_NAME_TEMPLATE={source}_{date:%Y-%m}
+```
+
+For an attachment `photo.jpg` sent by Alice on 2026-10-31, the filename would be `Alice_20261031_photo.jpg`. Filename and generated album name stems replace `/`, `\`, `:`, `*`, `?`, `"`, `<`, `>`, `|`, and control whitespace with underscores, collapse consecutive underscores, trim leading and trailing spaces, underscores and dots, and are limited to 200 characters. If a filename template fails or renders empty, the bot falls back to `{original_name}`, then to `{source}_{message_id}_{index}` (or `file_{index}` if needed).
+
 ## Telegram limits & gotchas
 
 - **Telegram caps single files at 2 GB** even with the local Bot API server. Files larger than that need MTProto (userbot) and are out of scope here.

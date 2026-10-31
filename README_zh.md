@@ -154,6 +154,38 @@ INFO immich_tg_bot.bot: Bot starting (allowed users: [...], album: Telegram Inbo
 
 最后三项通常保持默认即可 —— 它们与默认的 `docker-compose.yml` 保持一致。
 
+## Discord 命名模板
+
+`.env.example` 将 `DISCORD_FILENAME_TEMPLATE` 设置为 `{source}_{sender}_{message_id}_{index}`。如果未设置该变量，程序默认使用 `{original_name}`，保留附件的原始文件名。模板生成不含扩展名的文件名主体，程序会自动追加原扩展名。压缩包中解出的媒体保留各自的条目文件名，不使用此模板。
+
+`DISCORD_ALBUM_NAME_TEMPLATE` 使用相同的变量选择相册。该模板默认为空，使用 `DISCORD_ALBUM_NAME`（默认 `Discord Inbox`）；模板渲染失败或结果为空时，也会回退到该配置。
+
+| 变量 | Discord 中的值 |
+|---|---|
+| `{original_name}` | 不含扩展名的原附件文件名。 |
+| `{sender}` | 原消息作者的显示名称，缺失时依次使用用户名或用户 ID。 |
+| `{sender_id}`、`{source_id}` | 原消息作者的用户 ID。 |
+| `{source_username}`、`{username}` | 原消息作者的用户名，缺失时使用用户 ID。 |
+| `{source}`、`{chat_title}` | 服务器消息为 `服务器名_频道名`；私人会话中为作者显示名称。 |
+| `{chat_id}` | 原消息所在频道的 ID。 |
+| `{message_id}`、`{msg_id}` | 原消息 ID。 |
+| `{index}` | 附件在消息中的序号，从 1 开始。 |
+| `{date}`、`{msg_date}` | 原消息时间，使用 `TZ` 配置的时区（默认 `UTC`）。 |
+| `{exif_date}` | 附件的 EXIF 时间，使用 `TZ` 时区；无法读取时为空。 |
+| `{media_type}` | 按文件名推断的 MIME 类型为视频时是 `video`，否则为 `photo`。 |
+| `{file_unique_id}` | Discord 附件 ID。 |
+| `{caption}` | 原消息文本。 |
+
+`{forward_date}`、`{media_group_id}`、`{forward_source}`、`{forward_channel}`、`{forward_author}`、`{forward_source_id}` 和 `{forward_msg_id}` 在 Discord 导入中为空。未知变量也会渲染为空。日期变量支持 Python 日期格式，例如：
+
+```env
+TZ=Asia/Shanghai
+DISCORD_FILENAME_TEMPLATE={sender}_{date:%Y%m%d}_{original_name}
+DISCORD_ALBUM_NAME_TEMPLATE={source}_{date:%Y-%m}
+```
+
+例如 Alice 在 2026 年 10 月 31 日发送附件 `photo.jpg`，生成的文件名为 `Alice_20261031_photo.jpg`。文件名主体和模板生成的相册名中，`/`、`\`、`:`、`*`、`?`、`"`、`<`、`>`、`|`、换行和制表符会替换为下划线，连续下划线会合并，首尾的空格、下划线和点会被移除，长度最多为 200 个字符。文件名模板渲染失败或结果为空时，先回退到 `{original_name}`，再回退到 `{source}_{message_id}_{index}`（必要时使用 `file_{index}`）。
+
 ## Telegram 限制与注意事项
 
 - **单文件大小限制为 2 GB**：受限于 Telegram 本身，即使使用本地 Bot API 服务端也存在此上限。超过该大小的文件需要走 MTProto（userbot 协议），不在本项目的支持范围内。
