@@ -6,8 +6,8 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import httpx
-from PIL import Image, UnidentifiedImageError
 
+from .media_metadata import inspect_media
 from .retry import retry
 
 log = logging.getLogger(__name__)
@@ -57,25 +57,25 @@ class ImmichClient:
         file_modified_at: datetime,
         checksum: str | None = None,
         file_name: str | None = None,
+        is_image: bool | None = None,
     ) -> dict[str, Any]:
         headers: dict[str, str] = {}
         if checksum:
             headers["x-immich-checksum"] = checksum
         upload_name = file_name or file_path.name
         sidecar = None
-        try:
-            with Image.open(file_path):
-                # Keep original bytes/checksum intact. Immich extracts capture time from XMP.
-                date = file_created_at.astimezone(self._tz).isoformat()
-                sidecar = (
-                    '<x:xmpmeta xmlns:x="adobe:ns:meta/">'
-                    '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
-                    '<rdf:Description xmlns:exif="http://ns.adobe.com/exif/1.0/" '
-                    f'exif:DateTimeOriginal="{date}"/>'
-                    "</rdf:RDF></x:xmpmeta>"
-                ).encode()
-        except (UnidentifiedImageError, OSError):
-            pass
+        if is_image is None:
+            is_image = inspect_media(file_path, self._tz, file_created_at).is_image
+        if is_image:
+            # Keep original bytes/checksum intact. Immich extracts capture time from XMP.
+            date = file_created_at.astimezone(self._tz).isoformat()
+            sidecar = (
+                '<x:xmpmeta xmlns:x="adobe:ns:meta/">'
+                '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+                '<rdf:Description xmlns:exif="http://ns.adobe.com/exif/1.0/" '
+                f'exif:DateTimeOriginal="{date}"/>'
+                "</rdf:RDF></x:xmpmeta>"
+            ).encode()
 
         async def upload() -> dict[str, Any]:
             with file_path.open("rb") as f:

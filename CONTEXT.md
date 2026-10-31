@@ -26,6 +26,14 @@ _Avoid_: IngestionService, Uploader, ProcessingManager
 The aggregated status outcome of a processed batch of ingestion items.
 _Avoid_: UploadResult, ProcessResponse
 
+**CaptureTime**:
+The time used to describe when an imported media file was captured: its EXIF time when available, otherwise the current source message time. It is distinct from the message or forwarded date used for naming; an unavailable EXIF date remains absent.
+_Avoid_: MessageDate, UploadTime
+
+**MediaMetadata**:
+File-derived information about one media file, shared by naming and ingestion. It distinguishes an available EXIF date from the CaptureTime used when importing the file.
+_Avoid_: MessageMetadata (for file-derived information)
+
 **Deduplication**:
 The recognition of identical file contents, so repeated imports across messaging platforms share one Immich asset. Files with different contents remain distinct even when they look alike.
 _Avoid_: DedupCheck, Filter
@@ -38,6 +46,7 @@ _Avoid_: FilePattern, NameFormat, Rule
 
 **MessageMetadata**:
 The normalized context of a source message (author, chat, origin, timestamp, caption, index) used for dynamic naming and album routing, independent of its messaging platform.
+Message and forwarded dates describe the messaging context; the EXIF date describes the file independently and remains absent when unavailable.
 _Avoid_: TelegramContext, OriginInfo, MessageData
 
 **AlbumRouting**:

@@ -20,13 +20,14 @@ from .batches import IngestBatches, IngestRequest, Preparation
 from .config import Settings
 from .errors import failure_kind, format_failure
 from .i18n import resolve_language, t
+from .media_metadata import inspect_media
 from .naming import (
     disambiguate_filenames,
     resolve_album_name,
     resolve_filename,
     split_filename,
 )
-from .pipeline import IngestionPipeline, IngestItem, IngestSummary, _exif_datetime
+from .pipeline import IngestionPipeline, IngestItem, IngestSummary
 from .retry import retry
 from .runtime import ingestion_runtime
 from .telegram_metadata import extract_metadata
@@ -187,6 +188,7 @@ async def _extract_ingest_item(
     original_file_name = original_name or local.name
     fallback_dt = message.date.astimezone(UTC) if message.date else datetime.now(UTC)
 
+    file_metadata = None
     if settings is None:
         file_name = original_name or local.name
         target_album = None
@@ -204,7 +206,7 @@ async def _extract_ingest_item(
                 ext = ".mp4"
         if not split_filename(original_file_name)[1]:
             original_file_name += ext
-        exif_dt = _exif_datetime(local, target_tz)
+        file_metadata = inspect_media(local, target_tz, fallback_dt)
         meta = extract_metadata(
             message,
             target_tz=target_tz,
@@ -212,7 +214,7 @@ async def _extract_ingest_item(
             file_unique_id=file_unique_id,
             media_type=media_type,
             original_name=original_name,
-            exif_date=exif_dt,
+            exif_date=file_metadata.exif_date,
         )
 
         if media_type == "document":
@@ -237,6 +239,7 @@ async def _extract_ingest_item(
         created_at=fallback_dt,
         target_album=target_album,
         original_file_name=original_file_name,
+        metadata=file_metadata,
     )
 
 
@@ -387,6 +390,7 @@ async def run_bot(settings: Settings, pipeline: IngestionPipeline | None = None)
                     created_at=it.created_at,
                     target_album=it.target_album,
                     original_file_name=it.original_file_name,
+                    metadata=it.metadata,
                 )
                 for (it, _), final_fn in zip(raw_items, disambiguated, strict=False)
             ]

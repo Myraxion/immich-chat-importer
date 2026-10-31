@@ -5,24 +5,19 @@ import tempfile
 from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timezone, tzinfo
+from datetime import UTC, datetime, tzinfo
 from pathlib import Path
-
-from PIL import Image
 
 from .archives import extract, is_archive, walk_media
 from .errors import failure_kind
 from .immich import ImmichClient, sha1_file
+from .media_metadata import MediaMetadata, inspect_media
 from .retry import report_stage
 from .state import State
 
 log = logging.getLogger(__name__)
 
 DEVICE_ID = "immich-telegram-bot"
-
-# EXIF tag IDs
-_EXIF_DATETIME_ORIGINAL = 36867
-_EXIF_DATETIME = 306
 
 
 @dataclass(frozen=True)
@@ -36,6 +31,7 @@ class IngestItem:
     original_file_name: str | None = None
     platform: str = "telegram"
     attachment_id: str = ""
+    metadata: MediaMetadata | None = None
 
 
 @dataclass
@@ -47,33 +43,6 @@ class IngestSummary:
     error_messages: list[str] = field(default_factory=list)
     error_details: list[tuple[str, str, str]] = field(default_factory=list)
     skipped_messages: list[str] = field(default_factory=list)
-
-
-def _exif_datetime(path: Path, target_tz: tzinfo = UTC) -> datetime | None:
-    try:
-        with Image.open(path) as img:
-            exif = img.getexif()
-            original = exif.get_ifd(34665)
-    except Exception:
-        return None
-    if not exif:
-        return None
-    for tag, offset_tag in ((_EXIF_DATETIME_ORIGINAL, 36881), (_EXIF_DATETIME, 36880)):
-        raw = original.get(tag) or exif.get(tag)
-        if not raw:
-            continue
-        try:
-            value = datetime.strptime(str(raw), "%Y:%m:%d %H:%M:%S")
-            offset = original.get(offset_tag) or exif.get(offset_tag)
-            zone = target_tz
-            if offset:
-                parsed = datetime.strptime(str(offset), "%z").utcoffset()
-                if parsed is not None:
-                    zone = timezone(parsed)
-            return value.replace(tzinfo=zone)
-        except ValueError:
-            continue
-    return None
 
 
 def _safe_unlink(path: Path) -> None:
@@ -239,6 +208,7 @@ class IngestionPipeline:
                     )
         else:
             await self._dispatch_upload(
+                metadata=item.metadata,
                 file_path=item.local_path,
                 file_name=item.file_name,
                 target_album=item.target_album,
@@ -264,6 +234,7 @@ class IngestionPipeline:
         item_errors: list[str],
         album_groups: dict[str, dict[str, str]],
         archive_member: bool = False,
+        metadata: MediaMetadata | None = None,
         error_name: str | None = None,
     ) -> None:
         try:
@@ -273,6 +244,7 @@ class IngestionPipeline:
                 device_asset_id=device_asset_id,
                 fallback_created_at=created_at,
                 archive_member=archive_member,
+                metadata=metadata,
             )
             if status == "created":
                 summary.uploaded += 1
@@ -298,11 +270,13 @@ class IngestionPipeline:
         device_asset_id: str,
         fallback_created_at: datetime,
         archive_member: bool = False,
+        metadata: MediaMetadata | None = None,
     ) -> tuple[str, str]:
         checksum = await asyncio.to_thread(sha1_file, file_path)
         if archive_member:
             device_asset_id = f"{device_asset_id}:{checksum}"
-        created_at = _exif_datetime(file_path, self._target_tz) or fallback_created_at
+        metadata = metadata or inspect_media(file_path, self._target_tz, fallback_created_at)
+        created_at = metadata.capture_time
         modified_at = datetime.fromtimestamp(file_path.stat().st_mtime, tz=UTC)
 
         result = await self._immich.upload_asset(
@@ -313,6 +287,7 @@ class IngestionPipeline:
             file_created_at=created_at,
             file_modified_at=modified_at,
             checksum=checksum,
+            is_image=metadata.is_image,
         )
         asset_id = result["id"]
         status = result.get("status", "created")

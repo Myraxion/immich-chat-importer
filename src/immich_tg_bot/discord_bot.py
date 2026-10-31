@@ -17,8 +17,9 @@ from .batches import IngestBatches, IngestRequest, Preparation
 from .config import Settings
 from .errors import failure_kind, format_failure
 from .i18n import resolve_language, t
+from .media_metadata import inspect_media
 from .naming import MessageMetadata, resolve_album_name, resolve_filename, split_filename
-from .pipeline import IngestionPipeline, IngestItem, _exif_datetime
+from .pipeline import IngestionPipeline, IngestItem
 from .retry import retry
 from .runtime import ingestion_runtime
 
@@ -132,7 +133,9 @@ async def _prepare_import(
 
             await retry(download, f"download: {name}")
             stem, extension = split_filename(name)
-            exif_date = _exif_datetime(path, ZoneInfo(settings.tz))
+            file_metadata = inspect_media(
+                path, ZoneInfo(settings.tz), metadata.msg_date or metadata.date
+            )
             item_metadata = replace(
                 metadata,
                 index=index,
@@ -141,7 +144,7 @@ async def _prepare_import(
                 else "photo",
                 original_name=stem,
                 file_unique_id=str(attachment.id),
-                exif_date=exif_date.astimezone(ZoneInfo(settings.tz)) if exif_date else None,
+                exif_date=file_metadata.exif_date,
             )
             items.append(
                 IngestItem(
@@ -157,6 +160,7 @@ async def _prepare_import(
                         default_template="{original_name}",
                     ),
                     original_file_name=name,
+                    metadata=file_metadata,
                     created_at=metadata.msg_date or metadata.date,
                     target_album=resolve_album_name(
                         settings.discord_album_name_template,
