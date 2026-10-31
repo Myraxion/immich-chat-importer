@@ -16,7 +16,7 @@ Forward media to the Telegram bot, send attachments to the Discord bot in a DM, 
 ## Features
 
 - **Telegram**: import photos, videos, animations, audio, documents, media groups, and supported archives. The bundled local Bot API server supports large downloads.
-- **Discord**: import supported photo, video, and archive attachments from bot DMs or a user-installed message command. Menu replies are private; `/status` shows your five latest imports.
+- **Discord**: import supported photo, video, and archive attachments from bot DMs or a user-installed message command. Menu replies are private; `/status` shows your five latest imports since startup.
 - **Archives**: ZIP, RAR, 7z, and tar variants are unpacked server-side. Media in ordinary subdirectories is included; nested archives are not expanded. Archives exceeding the configured media count are rejected before their entries are uploaded.
 - **Shared ingestion**: reuse identical content across platforms, add assets to the target album, and retain successful imports when another item fails. Failed album associations can be retried.
 - **Naming and dates**: configure filenames and albums separately for each platform; photo timestamps use EXIF when available and otherwise the source message time.
@@ -27,11 +27,11 @@ Forward media to the Telegram bot, send attachments to the Discord bot in a DM, 
 
 ```text
 Telegram → local Bot API ─┐
-                          ├→ shared ingestion + SQLite state → Immich
+                          ├→ shared ingestion → Immich
 Discord → Gateway ────────┘
 ```
 
-Enabled adapters run in one process and serialize imports. Discord status queries remain responsive during an import. Discord-only deployments do not need the Telegram Bot API service or Telegram credentials.
+Enabled adapters run in one process and serialize imports. Discord status queries remain responsive during an import; status history is kept in memory and cleared on restart. Imports and manual retries process each file again, and Immich reuses assets with identical contents. Discord-only deployments do not need the Telegram Bot API service or Telegram credentials.
 
 ## Choose a deployment
 
@@ -148,7 +148,7 @@ All settings are read from `.env`. Telegram-specific required values apply only 
 | `MAX_ARCHIVE_MB` |  | `2000` | Hard limit for incoming archive size (MB). |
 | `MAX_ARCHIVE_FILES` |  | `1000` | Maximum media entries per archive; archives exceeding it are rejected before upload. |
 | `LOG_LEVEL` |  | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR`. |
-| `DATA_DIR` |  | `/data` | Inside-container path for `state.sqlite`. |
+| `DATA_DIR` |  | `/data` | Inside-container directory for temporary Discord downloads. |
 | `TELEGRAM_FILES_DIR` |  | `/var/lib/telegram-bot-api` | Inside-container path of the shared local-Bot-API volume. |
 | `TELEGRAM_API_BASE` |  | `http://telegram-bot-api:8081` | URL of the local Bot API server. |
 
@@ -197,7 +197,7 @@ For an attachment `photo.jpg` sent by Alice on 2026-10-31, the filename would be
 
 ## Updating
 
-For an existing `immich-telegram-bot` deployment, stop the old Compose stack before starting the renamed service to avoid container conflicts. Keep and back up `./data` to preserve ingestion state. The `immich-telegram-bot` CLI remains available as an alias. The new image must be published before pulling it.
+For an existing `immich-telegram-bot` deployment, stop the old Compose stack before starting the renamed service to avoid container conflicts. The old `state.sqlite` is no longer read or modified; existing status history is unavailable after upgrading. The `immich-telegram-bot` CLI remains available as an alias. The new image must be published before pulling it.
 
 ```bash
 docker compose pull

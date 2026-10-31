@@ -187,8 +187,7 @@ async def test_menu_private_response_uses_original_author_and_context(
 
     from immich_tg_bot.state import State
 
-    state = State(tmp_path / "state.sqlite")
-    await state.open()
+    state = State()
 
     class Pipeline:
         async def ingest(self, items, record_id=None, summary=None):
@@ -233,7 +232,6 @@ async def test_menu_private_response_uses_original_author_and_context(
         await handle_menu(interaction, message, settings, pipeline, client)
     assert len(await state.recent_ingest_records(42)) == 1
     assert await state.recent_ingest_records(99) == []
-    await state.close()
     assert events[0] == {"ephemeral": True, "thinking": True}
     assert events[1] == (f"{source}_Alice_10.jpg", source, 20)
     assert "已上传：1" in events[2]["content"]
@@ -404,30 +402,26 @@ async def test_status_denies_unlisted_users_and_reports_empty_history(tmp_path):
     from immich_tg_bot.discord_bot import handle_status
     from immich_tg_bot.state import State
 
-    state = State(tmp_path / "state.sqlite")
-    await state.open()
-    try:
-        record = await state.create_ingest_record(42, "20", "secret")
-        await state.finish_ingest_record(record, "failed", 0, 0, 0, 1, "photo.jpg: upload")
-        replies = []
+    state = State()
+    record = await state.create_ingest_record(42, "20", "secret")
+    await state.finish_ingest_record(record, "failed", 0, 0, 0, 1, "photo.jpg: upload")
+    replies = []
 
-        async def send_message(content, **kwargs):
-            replies.append((content, kwargs))
+    async def send_message(content, **kwargs):
+        replies.append((content, kwargs))
 
-        settings = Settings.model_construct(discord_allowed_user_ids=[42, 43])
-        interaction = SimpleNamespace(
-            user=SimpleNamespace(id=43), locale="en-US",
-            response=SimpleNamespace(send_message=send_message),
-        )
-        pipeline = SimpleNamespace(state=state)
-        await handle_status(interaction, settings, pipeline)
-        interaction.user.id = 99
-        await handle_status(interaction, settings, pipeline)
-        assert replies[0][0] == "No import records yet."
-        assert "not authorized" in replies[1][0]
-        assert all(reply[1]["ephemeral"] for reply in replies)
-    finally:
-        await state.close()
+    settings = Settings.model_construct(discord_allowed_user_ids=[42, 43])
+    interaction = SimpleNamespace(
+        user=SimpleNamespace(id=43), locale="en-US",
+        response=SimpleNamespace(send_message=send_message),
+    )
+    pipeline = SimpleNamespace(state=state)
+    await handle_status(interaction, settings, pipeline)
+    interaction.user.id = 99
+    await handle_status(interaction, settings, pipeline)
+    assert replies[0][0] == "No import records yet."
+    assert "not authorized" in replies[1][0]
+    assert all(reply[1]["ephemeral"] for reply in replies)
 
 
 async def test_expired_menu_reply_keeps_upload_and_status(tmp_path, monkeypatch):
@@ -503,12 +497,12 @@ async def test_expired_menu_reply_keeps_upload_and_status(tmp_path, monkeypatch)
 
         async with ingestion_runtime(settings) as pipeline:
             await handle_status(interaction, settings, pipeline)
-            assert "interrupted" in responses[-1]
+            assert "No import records yet." in responses[-1]
             interaction.edit_original_response = send_reply
             await handle_menu(interaction, message, settings, pipeline, client)
             records = await pipeline.state.recent_ingest_records(42)
-            assert [r.status for r in records] == ["completed", "interrupted", "completed"]
-            assert records[0].duplicates == 1
+            assert [r.status for r in records] == ["completed"]
+            assert records[0].uploaded == 1
 
 
 async def test_restart_does_not_replay_and_manual_retry_finishes_album(tmp_path, monkeypatch):
@@ -524,6 +518,8 @@ async def test_restart_does_not_replay_and_manual_retry_finishes_album(tmp_path,
     async def immich(request):
         calls.append((request.method, request.url.path))
         if request.url.path == "/assets":
+            if calls.count(("POST", "/assets")) > 1:
+                return httpx.Response(200, json={"id": "asset", "status": "duplicate"})
             return httpx.Response(201, json={"id": "asset", "status": "created"})
         if request.method == "GET":
             return httpx.Response(200, json=[{"id": "album", "albumName": "Discord Inbox"}])
@@ -580,12 +576,12 @@ async def test_restart_does_not_replay_and_manual_retry_finishes_album(tmp_path,
         block_album = False
         async with ingestion_runtime(settings) as pipeline:
             await handle_status(interaction, settings, pipeline)
-            assert "interrupted" in replies[-1]
+            assert "No import records yet." in replies[-1]
             assert calls == before_restart
             await handle_menu(interaction, message, settings, pipeline, client)
             records = await pipeline.state.recent_ingest_records(42)
-            assert [r.status for r in records] == ["completed", "interrupted"]
+            assert [r.status for r in records] == ["completed"]
             assert records[0].duplicates == 1
-            assert calls.count(("POST", "/assets")) == 1
+            assert calls.count(("POST", "/assets")) == 2
             assert calls.count(("GET", "/photo")) == 2
             assert calls.count(("PUT", "/albums/album/assets")) == 2

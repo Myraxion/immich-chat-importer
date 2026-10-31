@@ -16,7 +16,7 @@
 ## 特性
 
 - **Telegram**：导入照片、视频、动图、音频、文档、媒体组及支持的压缩包；内置本地 Bot API 服务支持大文件下载。
-- **Discord**：通过机器人私信或个人安装的消息命令导入支持的照片、视频和压缩包附件。菜单回复仅调用者可见；`/status` 可查询最近五次导入。
+- **Discord**：通过机器人私信或个人安装的消息命令导入支持的照片、视频和压缩包附件。菜单回复仅调用者可见；`/status` 可查询本次启动后的最近五次导入。
 - **压缩包**：在服务端解压 ZIP、RAR、7z 和 tar 系列，包含普通子目录中的媒体，但不递归解压嵌套压缩包。媒体数量超限时，在上传条目前拒绝整个包。
 - **共享导入**：跨平台复用完全相同的内容并加入目标相册；单项失败不撤销其他成功结果，相册关联失败可手动重试。
 - **命名与日期**：两平台可分别配置文件名与相册；照片优先使用 EXIF 拍摄时间，否则使用来源消息时间。
@@ -27,11 +27,11 @@
 
 ```text
 Telegram → 本地 Bot API ─┐
-                         ├→ 共享导入流程和 SQLite 状态 → Immich
+                         ├→ 共享导入流程 → Immich
 Discord → Gateway ───────┘
 ```
 
-启用的平台在同一进程中运行，导入批次串行执行；导入期间仍可查询 Discord 状态。仅 Discord 部署不需要 Telegram Bot API 服务或 Telegram 凭证。
+启用的平台在同一进程中运行，导入批次串行执行；导入期间仍可查询 Discord 状态。状态记录保存在内存中，重启后清空。每次导入或手动重试都会重新处理文件，由 Immich 复用内容相同的资产。仅 Discord 部署不需要 Telegram Bot API 服务或 Telegram 凭证。
 
 ## 选择部署模式
 
@@ -148,7 +148,7 @@ INFO immich_tg_bot.bot: Bot starting (allowed users: [...], album: Telegram Inbo
 | `MAX_ARCHIVE_MB` |  | `2000` | 允许传入的压缩包大小上限（MB）。 |
 | `MAX_ARCHIVE_FILES` |  | `1000` | 单个压缩包的媒体条目数量上限；超限时上传前拒绝整个包。 |
 | `LOG_LEVEL` |  | `INFO` | 日志级别：`DEBUG` / `INFO` / `WARNING` / `ERROR`。 |
-| `DATA_DIR` |  | `/data` | 容器内部 `state.sqlite` 的存储路径。 |
+| `DATA_DIR` |  | `/data` | 容器内部 Discord 附件临时下载目录。 |
 | `TELEGRAM_FILES_DIR` |  | `/var/lib/telegram-bot-api` | 本地 Bot API 共享卷在容器内的挂载路径。 |
 | `TELEGRAM_API_BASE` |  | `http://telegram-bot-api:8081` | 本地 Bot API 服务的访问地址。 |
 
@@ -196,7 +196,7 @@ DISCORD_ALBUM_NAME_TEMPLATE={source}_{date:%Y-%m}
 
 ## 更新
 
-从原 `immich-telegram-bot` 部署升级时，先停止旧 Compose 服务，再启动改名后的服务，避免容器冲突。保留并备份 `./data` 以保存导入状态。旧的 `immich-telegram-bot` 命令仍可作为别名使用；新镜像发布后才能拉取。
+从原 `immich-telegram-bot` 部署升级时，先停止旧 Compose 服务，再启动改名后的服务，避免容器冲突。旧 `state.sqlite` 不再被读取或修改，升级后无法查询旧导入历史。旧的 `immich-telegram-bot` 命令仍可作为别名使用；新镜像发布后才能拉取。
 
 ```bash
 docker compose pull

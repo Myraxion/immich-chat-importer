@@ -15,7 +15,7 @@ A set of ingestion items processed together for one import request, with a combi
 _Avoid_: UploadJob, ImportTransaction
 
 **IngestRecord**:
-The queryable status and outcome of one ingestion batch, belonging to the user who requested the import. An interrupted record describes unfinished work and does not imply automatic resumption.
+The queryable status and outcome of one ingestion batch, belonging to the user who requested the import. Records are available during the current service run and are discarded on restart.
 _Avoid_: RecoveryTask, ResumeJob
 
 **IngestionPipeline**:
@@ -27,7 +27,7 @@ The aggregated status outcome of a processed batch of ingestion items.
 _Avoid_: UploadResult, ProcessResponse
 
 **Deduplication**:
-The recognition of previously imported source files and identical file contents, so repeated imports across messaging platforms share one Immich asset. Files with different contents remain distinct even when they look alike.
+The recognition of identical file contents, so repeated imports across messaging platforms share one Immich asset. Files with different contents remain distinct even when they look alike.
 _Avoid_: DedupCheck, Filter
 
 ### Naming and Organization

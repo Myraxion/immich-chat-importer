@@ -120,38 +120,28 @@ class IngestionPipeline:
             await self._ingest_item(item, summary, album_groups)
 
         for album_key, assets in album_groups.items():
-            pending = assets
             stage = "album lookup/create"
             try:
                 if self._album_id and album_key == self._album_id:
                     target_id = self._album_id
                 else:
                     target_id = await self._immich.get_or_create_album(album_key)
-                pending = {
-                    asset_id: name
-                    for asset_id, name in assets.items()
-                    if not await self._state.album_completed(asset_id, target_id)
-                }
-                if not pending:
-                    continue
                 stage = "album association"
-                failures = await self._immich.add_to_album(target_id, list(pending)) or {}
-                for asset_id, name in pending.items():
+                failures = await self._immich.add_to_album(target_id, list(assets)) or {}
+                for asset_id, name in assets.items():
                     if asset_id in failures:
                         summary.errors += 1
                         summary.error_messages.append(
                             f"{name} ({asset_id}): {stage} {album_key}: {failures[asset_id]}"
                         )
-                    else:
-                        await self._state.mark_album_completed(asset_id, target_id)
             except Exception as e:
                 log.warning(
                     "Failed to add %d asset(s) to album %r: %s",
-                    len(pending),
+                    len(assets),
                     album_key,
                     e,
                 )
-                for asset_id, name in pending.items():
+                for asset_id, name in assets.items():
                     summary.errors += 1
                     summary.error_messages.append(f"{name} ({asset_id}): {stage} {album_key}: {e}")
 
@@ -167,25 +157,9 @@ class IngestionPipeline:
         summary: IngestSummary,
         album_groups: dict[str, dict[str, str]],
     ) -> None:
-        # 1. 消息级去重
         legacy = item.platform == "telegram" and not item.attachment_id
         identity = (item.platform, str(item.chat_id), str(item.message_id), item.attachment_id)
-        processed = (
-            legacy and await self._state.already_processed(item.chat_id, item.message_id)
-        ) or (not legacy and await self._state.item_processed(*identity))
-        album = item.target_album or self._default_album_name or self._album_id
-        if processed:
-            assets = await self._state.source_assets(identity)
-            if assets or not album:
-                summary.duplicates += max(1, len(assets))
-                if album:
-                    album_groups[album].update(assets)
-                self._maybe_cleanup(item.local_path)
-                return
-
-        # 2. 单文件 vs 归档展开
         item_errors: list[str] = []
-        item_new_ids: list[str] = []
 
         prefix = (
             f"telegram:{item.chat_id}:{item.message_id}"
@@ -221,12 +195,6 @@ class IngestionPipeline:
                 if not media:
                     log.info("Archive %s contained no recognised media", item.local_path)
                     summary.skipped_messages.append(f"{archive_name}: no supported media")
-                    if legacy:
-                        await self._state.mark_processed(
-                            item.chat_id, item.message_id, 0, "done", None
-                        )
-                    else:
-                        await self._state.mark_item_processed(*identity)
                     self._maybe_cleanup(item.local_path)
                     return
 
@@ -239,10 +207,8 @@ class IngestionPipeline:
                         archive_member=True,
                         created_at=item.created_at,
                         summary=summary,
-                        item_new_ids=item_new_ids,
                         item_errors=item_errors,
                         album_groups=album_groups,
-                        identity=identity,
                         error_name=f"{archive_name}: {m.relative_to(tmp).as_posix()}",
                     )
         else:
@@ -253,18 +219,11 @@ class IngestionPipeline:
                 device_asset_id=prefix,
                 created_at=item.created_at,
                 summary=summary,
-                item_new_ids=item_new_ids,
                 item_errors=item_errors,
                 album_groups=album_groups,
-                identity=identity,
             )
 
-        # 3. 严格成功标记：若无错误，标记消息已完成
         if not item_errors:
-            if legacy:
-                await self._state.mark_processed(item.chat_id, item.message_id, 0, "done", None)
-            else:
-                await self._state.mark_item_processed(*identity)
             self._maybe_cleanup(item.local_path)
 
     async def _dispatch_upload(
@@ -276,10 +235,8 @@ class IngestionPipeline:
         device_asset_id: str,
         created_at: datetime,
         summary: IngestSummary,
-        item_new_ids: list[str],
         item_errors: list[str],
         album_groups: dict[str, dict[str, str]],
-        identity: tuple[str, str, str, str],
         archive_member: bool = False,
         error_name: str | None = None,
     ) -> None:
@@ -294,10 +251,8 @@ class IngestionPipeline:
             if status == "created":
                 summary.uploaded += 1
                 summary.new_asset_ids.append(asset_id)
-                item_new_ids.append(asset_id)
-            elif status in ("duplicate", "cached"):
+            elif status == "duplicate":
                 summary.duplicates += 1
-            await self._state.save_source_asset(identity, asset_id, file_name)
             effective_album = target_album or self._default_album_name or self._album_id
             if effective_album:
                 album_groups[effective_album][asset_id] = file_name
@@ -320,10 +275,6 @@ class IngestionPipeline:
         checksum = await asyncio.to_thread(sha1_file, file_path)
         if archive_member:
             device_asset_id = f"{device_asset_id}:{checksum}"
-        cached = await self._state.asset_for_sha1(checksum)
-        if cached:
-            return "cached", cached
-
         created_at = _exif_datetime(file_path) or fallback_created_at
         modified_at = datetime.fromtimestamp(file_path.stat().st_mtime, tz=UTC)
 
@@ -338,5 +289,4 @@ class IngestionPipeline:
         )
         asset_id = result["id"]
         status = result.get("status", "created")
-        await self._state.cache_sha1(checksum, asset_id)
         return status, asset_id

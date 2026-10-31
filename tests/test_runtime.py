@@ -8,7 +8,6 @@ import pytest
 from immich_tg_bot.config import Settings
 from immich_tg_bot.pipeline import IngestItem
 from immich_tg_bot.runtime import ingestion_runtime
-from immich_tg_bot.state import State
 
 
 async def test_combined_runtime_stops_both_adapters_together(tmp_path, monkeypatch):
@@ -44,7 +43,7 @@ async def test_combined_runtime_stops_both_adapters_together(tmp_path, monkeypat
     assert stopped.is_set()
 
 
-async def test_restart_interrupts_unfinished_records_without_changing_completed(tmp_path):
+async def test_restart_discards_all_status_records(tmp_path):
     settings = Settings.model_construct(
         data_dir=tmp_path,
         telegram_album_name=None,
@@ -52,29 +51,16 @@ async def test_restart_interrupts_unfinished_records_without_changing_completed(
         immich_api_key="key",
     )
     async with ingestion_runtime(settings) as pipeline:
-        waiting = await pipeline.state.create_ingest_record(42, "channel", "waiting")
+        await pipeline.state.create_ingest_record(42, "channel", "waiting")
         running = await pipeline.state.create_ingest_record(42, "channel", "running")
         await pipeline.state.start_ingest_record(running)
         finished = await pipeline.state.create_ingest_record(99, "other", "finished")
         await pipeline.state.finish_ingest_record(finished, "completed", 1, 0, 0, 0, "saved")
 
     async with ingestion_runtime(settings) as pipeline:
-        records = await pipeline.state.recent_ingest_records(42)
-        assert [(r.id, r.message_id, r.status) for r in records] == [
-            (running, "running", "interrupted"),
-            (waiting, "waiting", "interrupted"),
-        ]
-        completed = (await pipeline.state.recent_ingest_records(99))[0]
-        assert (completed.status, completed.uploaded, completed.details) == (
-            "completed",
-            1,
-            "saved",
-        )
-
-    state = State(tmp_path / "state.sqlite")
-    await state.open()
-    assert all(r.status == "interrupted" for r in await state.recent_ingest_records(42))
-    await state.close()
+        assert await pipeline.state.recent_ingest_records(42) == []
+        assert await pipeline.state.recent_ingest_records(99) == []
+    assert not (tmp_path / "state.sqlite").exists()
 
 
 async def test_runtime_opens_shared_ingestion_and_closes_immich_on_error(
@@ -112,7 +98,7 @@ async def test_runtime_opens_shared_ingestion_and_closes_immich_on_error(
     async with ingestion_runtime(settings) as pipeline:
         image.write_bytes(b"photo")
         result = await pipeline.ingest([IngestItem(1, 2, image, image.name, datetime.now(UTC))])
-        assert result.duplicates == 1
+        assert result.uploaded == 1
 
 
 async def test_discord_without_album_does_not_use_telegram_album(tmp_path, monkeypatch):

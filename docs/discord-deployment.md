@@ -26,13 +26,13 @@ Discord 配置：`DISCORD_ALBUM_NAME` 默认 `Discord Inbox`；`DISCORD_ALBUM_NA
 
 ## Use and upgrade / 使用与升级
 
-Send attachments to the bot DM, or use Apps → **Save to Immich** on a message. Menu results are private. `/status` shows your five most recent Discord imports, including waiting, running, partial, failed and interrupted results. Long imports continue after an interaction expires; query `/status`. Retry by sending again or invoking the menu again: already saved bytes are reused and a failed album association can be completed. Restart marks unfinished records interrupted; it does not resume them automatically. Telegram and Discord batches run serially, while status queries remain available.
+Send attachments to the bot DM, or use Apps → **Save to Immich** on a message. Menu results are private. `/status` shows your five most recent Discord imports since startup, including waiting, running, partial and failed results. Long imports continue after an interaction expires; query `/status` while the process is running. Restart clears the history and does not resume unfinished imports. Retry by sending again or invoking the menu again: files are processed again, Immich reuses matching assets, and a failed album association can be completed. Telegram and Discord batches run serially, while status queries remain available.
 
-向 bot 私信发送附件，或在消息的 Apps 菜单选择 **保存到 Immich**；菜单回复仅调用者可见。`/status` 显示自己最近五次 Discord 导入，包括等待、运行、部分成功、失败和中断。交互过期后长任务仍继续，可用 `/status` 查询。重新发送或再次选择菜单可手动重试：已保存的相同内容会复用，并可补齐失败的相册关联。重启将未完成记录标记为中断，不自动恢复；两平台批次串行执行，状态查询仍可响应。
+向 bot 私信发送附件，或在消息的 Apps 菜单选择 **保存到 Immich**；菜单回复仅调用者可见。`/status` 显示本次启动后自己最近五次 Discord 导入，包括等待、运行、部分成功和失败。交互过期后长任务仍继续，进程运行期间可用 `/status` 查询。重启会清空历史记录，不自动恢复未完成的导入。重新发送或再次选择菜单可手动重试：文件会重新处理，Immich 复用已有的相同内容，并可补齐失败的相册关联。两平台批次串行执行，状态查询仍可响应。
 
-For upgrades, back up `./data` and retain it when replacing the image; it contains the SQLite state and existing Telegram identities. Existing Telegram configuration remains the default. Pull the new image and recreate the container with the command for your chosen mode. Exact-content deduplication is shared across platforms; visual similarity is not considered. The app does not monitor arbitrary chats, export to Discord, maintain separate Immich accounts, or automatically replay jobs.
+Existing `state.sqlite` files are left untouched but are no longer read; their status history is unavailable after upgrading. `DATA_DIR` remains in use for temporary Discord downloads. Existing Telegram configuration remains the default. Pull the new image and recreate the container with the command for your chosen mode. Exact-content deduplication is shared across platforms; visual similarity is not considered. The app does not monitor arbitrary chats, export to Discord, maintain separate Immich accounts, or automatically replay jobs.
 
-升级前备份并保留 `./data`，其中的 SQLite 状态包含旧 Telegram 身份记录；原 Telegram 配置和默认模式保持兼容。拉取新镜像后按所选模式重建容器。两平台共享精确内容去重，不做视觉相似匹配；不监听任意聊天、不导出到 Discord、不支持多个 Immich 账号或自动重放任务。
+旧 `state.sqlite` 文件会保留，但不再读取，升级后无法查询其中的历史记录。`DATA_DIR` 仍用于 Discord 附件的临时下载。原 Telegram 配置和默认模式保持兼容，拉取新镜像后按所选模式重建容器。两平台共享精确内容去重，不做视觉相似匹配；不监听任意聊天、不导出到 Discord、不支持多个 Immich 账号或自动重放任务。
 
 ## Acceptance evidence / 验收记录
 
