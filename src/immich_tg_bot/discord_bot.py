@@ -93,112 +93,118 @@ async def _prepare_import(
     attachments = list(message.attachments)
     for snapshot in getattr(message, "message_snapshots", []):
         attachments.extend(snapshot.attachments)
-    for index, attachment in enumerate(attachments, 1):
-        name = attachment.filename or str(attachment.id)
-        batch.stage = f"{name}: download"
-        if not (is_media(name) or is_archive(name)):
-            skipped.append(name)
-            continue
-        if attachment.size > limit:
-            errors.append(
-                f"{name}: "
-                + t("discord_too_large", lang_code=lang, limit=settings.discord_max_attachment_mb)
-                + ". "
-                + t("failure_size", lang_code=lang, default_lang=settings.default_language)
-            )
-            continue
-        path = None
-        try:
-            with tempfile.NamedTemporaryFile(
-                dir=download_dir, prefix="discord-", delete=False
-            ) as f:
-                path = Path(f.name)
-
-            async def download(download_path: Path = path, url: str = attachment.url) -> None:
-                with download_path.open("wb") as f:  # noqa: ASYNC230
-                    async with client.stream("GET", url) as response:
-                        response.raise_for_status()
-                        size = 0
-                        async for chunk in response.aiter_bytes():
-                            size += len(chunk)
-                            if size > limit:
-                                raise ValueError(
-                                    t(
-                                        "discord_too_large",
-                                        lang_code=lang,
-                                        limit=settings.discord_max_attachment_mb,
-                                    )
-                                )
-                            f.write(chunk)
-
-            await retry(download, f"download: {name}")
-            stem, extension = split_filename(name)
-            file_metadata = inspect_media(
-                path, ZoneInfo(settings.tz), metadata.msg_date or metadata.date
-            )
-            item_metadata = replace(
-                metadata,
-                index=index,
-                media_type="video"
-                if (mimetypes.guess_type(name)[0] or "").startswith("video/")
-                else "photo",
-                original_name=stem,
-                file_unique_id=str(attachment.id),
-                exif_date=file_metadata.exif_date,
-            )
-            items.append(
-                IngestItem(
-                    chat_id=message.channel.id,
-                    message_id=message.id,
-                    attachment_id=str(attachment.id),
-                    platform="discord",
-                    local_path=path,
-                    file_name=resolve_filename(
-                        settings.discord_filename_template,
-                        item_metadata,
-                        extension,
-                        default_template="{original_name}",
-                    ),
-                    original_file_name=name,
-                    metadata=file_metadata,
-                    created_at=metadata.msg_date or metadata.date,
-                    target_album=resolve_album_name(
-                        settings.discord_album_name_template,
-                        item_metadata,
-                        fallback_album=settings.discord_album_name,
-                    ),
-                )
-            )
-        except Exception as exc:
-            if path:
-                path.unlink(missing_ok=True)
-            reason = (
-                f"HTTP {exc.response.status_code}"
-                if isinstance(exc, httpx.HTTPStatusError)
-                else (
-                    t("discord_network_error", lang_code=lang)
-                    if isinstance(exc, httpx.HTTPError)
-                    else str(exc)
-                )
-            )
-            log.warning("Discord download failed for %s: %s", name, reason)
-            safe = format_failure(
-                name,
-                "download",
-                "failure_size" if isinstance(exc, ValueError) else failure_kind(exc),
-                lang,
-                settings.default_language,
-            )
-            errors.append(f"{safe} ({reason})" if isinstance(exc, ValueError) else safe)
+    downloads: dict[Path, str] = {}
     try:
+        for index, attachment in enumerate(attachments, 1):
+            name = attachment.filename or str(attachment.id)
+            batch.stage = f"{name}: download"
+            if not (is_media(name) or is_archive(name)):
+                skipped.append(name)
+                continue
+            if attachment.size > limit:
+                errors.append(
+                    f"{name}: "
+                    + t(
+                        "discord_too_large",
+                        lang_code=lang,
+                        limit=settings.discord_max_attachment_mb,
+                    )
+                    + ". "
+                    + t("failure_size", lang_code=lang, default_lang=settings.default_language)
+                )
+                continue
+            path = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    dir=download_dir, prefix="discord-", delete=False
+                ) as f:
+                    path = Path(f.name)
+                    downloads[path] = name
+
+                async def download(download_path: Path = path, url: str = attachment.url) -> None:
+                    with download_path.open("wb") as f:  # noqa: ASYNC230
+                        async with client.stream("GET", url) as response:
+                            response.raise_for_status()
+                            size = 0
+                            async for chunk in response.aiter_bytes():
+                                size += len(chunk)
+                                if size > limit:
+                                    raise ValueError(
+                                        t(
+                                            "discord_too_large",
+                                            lang_code=lang,
+                                            limit=settings.discord_max_attachment_mb,
+                                        )
+                                    )
+                                f.write(chunk)
+
+                await retry(download, f"download: {name}")
+                stem, extension = split_filename(name)
+                file_metadata = inspect_media(
+                    path, ZoneInfo(settings.tz), metadata.msg_date or metadata.date
+                )
+                item_metadata = replace(
+                    metadata,
+                    index=index,
+                    media_type="video"
+                    if (mimetypes.guess_type(name)[0] or "").startswith("video/")
+                    else "photo",
+                    original_name=stem,
+                    file_unique_id=str(attachment.id),
+                    exif_date=file_metadata.exif_date,
+                )
+                items.append(
+                    IngestItem(
+                        chat_id=message.channel.id,
+                        message_id=message.id,
+                        attachment_id=str(attachment.id),
+                        platform="discord",
+                        local_path=path,
+                        file_name=resolve_filename(
+                            settings.discord_filename_template,
+                            item_metadata,
+                            extension,
+                            default_template="{original_name}",
+                        ),
+                        original_file_name=name,
+                        metadata=file_metadata,
+                        created_at=metadata.msg_date or metadata.date,
+                        target_album=resolve_album_name(
+                            settings.discord_album_name_template,
+                            item_metadata,
+                            fallback_album=settings.discord_album_name,
+                        ),
+                    )
+                )
+            except Exception as exc:
+                if path:
+                    path.unlink(missing_ok=True)
+                reason = (
+                    f"HTTP {exc.response.status_code}"
+                    if isinstance(exc, httpx.HTTPStatusError)
+                    else (
+                        t("discord_network_error", lang_code=lang)
+                        if isinstance(exc, httpx.HTTPError)
+                        else str(exc)
+                    )
+                )
+                log.warning("Discord download failed for %s: %s", name, reason)
+                safe = format_failure(
+                    name,
+                    "download",
+                    "failure_size" if isinstance(exc, ValueError) else failure_kind(exc),
+                    lang,
+                    settings.default_language,
+                )
+                errors.append(f"{safe} ({reason})" if isinstance(exc, ValueError) else safe)
         yield
     finally:
         if settings.cleanup_local_files:
-            for item in items:
+            for path, name in downloads.items():
                 try:
-                    item.local_path.unlink(missing_ok=True)
+                    path.unlink(missing_ok=True)
                 except OSError:
-                    batch.stage = f"{item.original_file_name}: cleanup"
+                    batch.stage = f"{name}: cleanup"
                     raise
 
 

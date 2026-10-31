@@ -4,6 +4,7 @@ import logging
 import mimetypes
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -240,6 +241,7 @@ async def _extract_ingest_item(
         target_album=target_album,
         original_file_name=original_file_name,
         metadata=file_metadata,
+        owns_local_file=False,
     )
 
 
@@ -346,6 +348,7 @@ async def run_bot(settings: Settings, pipeline: IngestionPipeline | None = None)
 
     groups: dict[str, list[Message]] = {}
     group_tasks: dict[str, asyncio.Task[None]] = {}
+    active_groups: set[asyncio.Task[None]] = set()
     group_lock = asyncio.Lock()
 
     async def _process_messages(messages: list[Message]) -> None:
@@ -382,16 +385,7 @@ async def run_bot(settings: Settings, pipeline: IngestionPipeline | None = None)
             disambiguated = disambiguate_filenames(filenames)
 
             batch.items = [
-                IngestItem(
-                    chat_id=it.chat_id,
-                    message_id=it.message_id,
-                    local_path=it.local_path,
-                    file_name=final_fn,
-                    created_at=it.created_at,
-                    target_album=it.target_album,
-                    original_file_name=it.original_file_name,
-                    metadata=it.metadata,
-                )
+                replace(it, file_name=final_fn)
                 for (it, _), final_fn in zip(raw_items, disambiguated, strict=False)
             ]
 
@@ -467,6 +461,9 @@ async def run_bot(settings: Settings, pipeline: IngestionPipeline | None = None)
                 group_tasks[message.media_group_id] = asyncio.create_task(
                     _flush_group(message.media_group_id)
                 )
+                task = group_tasks[message.media_group_id]
+                active_groups.add(task)
+                task.add_done_callback(active_groups.discard)
             return
         await _process_messages([message])
 
@@ -477,9 +474,11 @@ async def run_bot(settings: Settings, pipeline: IngestionPipeline | None = None)
         settings.immich_url,
     )
     try:
-        await dp.start_polling(bot, handle_signals=True)
+        await dp.start_polling(bot, handle_signals=True, close_bot_session=False)
     finally:
-        # Drain any pending media-group flushes
-        for task in list(group_tasks.values()):
+        # Finish cancellation before closing resources used by ingestion.
+        pending = list(active_groups)
+        for task in pending:
             task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
         await bot.session.close()

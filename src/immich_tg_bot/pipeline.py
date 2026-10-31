@@ -32,6 +32,8 @@ class IngestItem:
     platform: str = "telegram"
     attachment_id: str = ""
     metadata: MediaMetadata | None = None
+    # Borrowed source caches must outlive this individual ingestion item.
+    owns_local_file: bool = True
 
 
 @dataclass
@@ -63,12 +65,14 @@ class IngestionPipeline:
         device_id: str = DEVICE_ID,
         cleanup_local: bool = True,
         target_tz: tzinfo = UTC,
+        max_archive_mb: int = 2000,
     ) -> None:
         self._immich = immich
         self._state = state
         self._album_id = album_id
         self._default_album_name = default_album_name
         self._max_archive_files = max_archive_files
+        self._max_archive_bytes = max_archive_mb * 1024 * 1024
         self._device_id = device_id
         self._cleanup_local = cleanup_local
         self._target_tz = target_tz
@@ -158,6 +162,14 @@ class IngestionPipeline:
             with tempfile.TemporaryDirectory(prefix="tg-archive-") as tmpdir:
                 tmp = Path(tmpdir)
                 try:
+                    if item.local_path.stat().st_size > self._max_archive_bytes:
+                        name = item.original_file_name or item.file_name
+                        summary.errors += 1
+                        summary.error_messages.append(
+                            f"{name}: extract: archive exceeds size limit"
+                        )
+                        summary.error_details.append((name, "extract", "failure_size"))
+                        return
                     await extract(item.local_path, tmp)
                 except Exception as e:
                     log.exception("Extraction failed for %s", item.local_path)
@@ -190,7 +202,8 @@ class IngestionPipeline:
                 if not media:
                     log.info("Archive %s contained no recognised media", item.local_path)
                     summary.skipped_messages.append(f"{archive_name}: no supported media")
-                    self._maybe_cleanup(item.local_path)
+                    if item.owns_local_file:
+                        self._maybe_cleanup(item.local_path)
                     return
 
                 for m in media:
@@ -219,7 +232,7 @@ class IngestionPipeline:
                 album_groups=album_groups,
             )
 
-        if not item_errors:
+        if not item_errors and item.owns_local_file:
             self._maybe_cleanup(item.local_path)
 
     async def _dispatch_upload(

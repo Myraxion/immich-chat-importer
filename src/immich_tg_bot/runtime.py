@@ -19,6 +19,7 @@ async def ingestion_runtime(settings: Settings) -> AsyncIterator[IngestionPipeli
             immich=immich,
             state=state,
             max_archive_files=settings.max_archive_files,
+            max_archive_mb=settings.max_archive_mb,
             cleanup_local=settings.cleanup_local_files,
             target_tz=ZoneInfo(settings.tz),
         )
