@@ -6,10 +6,10 @@ from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
-from aiogram import Bot
-from aiogram.types import Message
 
 from immich_chat_importer.adapters.telegram.bot import _extract_ingest_item
+from immich_chat_importer.adapters.telegram.client import TelegramClient as Bot
+from immich_chat_importer.adapters.telegram.message import Message
 from immich_chat_importer.config import Settings
 from immich_chat_importer.pipeline import IngestionPipeline, IngestItem
 from immich_chat_importer.state import State
@@ -154,7 +154,6 @@ async def test_concurrent_batches_reuse_identical_content(
     fake_immich.add_to_album.assert_any_await("Discord", ["asset"])
 
 
-
 async def test_repeat_source_routes_existing_asset_after_restart(
     tmp_path: Path, fake_immich: AsyncMock
 ) -> None:
@@ -173,9 +172,6 @@ async def test_repeat_source_routes_existing_asset_after_restart(
     assert fake_immich.upload_asset.await_count == 2
     fake_immich.add_to_album.assert_any_await("first", ["asset-123"])
     fake_immich.add_to_album.assert_any_await("second", ["asset-123"])
-
-
-
 
 
 async def test_album_failure_can_be_retried_after_restart(
@@ -199,8 +195,6 @@ async def test_album_failure_can_be_retried_after_restart(
     assert (second.duplicates, second.errors) == (1, 0)
     assert fake_immich.upload_asset.await_count == 2
     assert fake_immich.add_to_album.await_count == 2
-
-
 
 
 async def test_partial_album_failure_retries_all_associations(
@@ -253,7 +247,6 @@ async def test_remote_duplicate_assets_are_routed(
     fake_immich.add_to_album.assert_awaited_once_with("trip", ["remote", "other"])
 
 
-
 async def test_archive_assets_survive_album_lookup_failure_and_restart(
     tmp_path: Path, fake_immich: AsyncMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -281,8 +274,6 @@ async def test_archive_assets_survive_album_lookup_failure_and_restart(
     assert (retry.duplicates, retry.errors) == (2, 0)
     assert fake_immich.upload_asset.await_count == 4
     assert set(fake_immich.add_to_album.await_args.args[1]) == {"asset-a", "asset-b"}
-
-
 
 
 async def test_multiple_attachments_in_one_message_are_independent(
@@ -336,11 +327,6 @@ async def test_source_identity_isolated_across_platforms_and_channels(
         len({call.kwargs["device_asset_id"] for call in fake_immich.upload_asset.await_args_list})
         == 3
     )
-
-
-
-
-
 
 
 async def test_archive_member_identity_survives_reordering_and_renaming(
@@ -457,7 +443,7 @@ async def test_ingest_document_uses_inferred_archive_extension(
         Bot,
         SimpleNamespace(get_file=AsyncMock(return_value=SimpleNamespace(file_path=str(cached)))),
     )
-    message = Message.model_validate(
+    message = Message.from_payload(
         {
             "message_id": 42,
             "date": 1792573200,
@@ -514,11 +500,6 @@ async def test_ingest_single_file_uploads_and_updates_state(
     assert summary.new_asset_ids == ["asset-123"]
 
     fake_immich.upload_asset.assert_awaited_once()
-
-
-
-
-
 
 
 @pytest.mark.asyncio

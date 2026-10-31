@@ -3,9 +3,9 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from aiogram import Bot
 
 from immich_chat_importer.adapters.telegram.bot import _resolve_local_path
+from immich_chat_importer.adapters.telegram.client import TelegramClient as Bot
 
 
 @pytest.mark.asyncio
@@ -50,24 +50,10 @@ async def test_telegram_status_only_shows_callers_telegram_records():
     ],
 )
 async def test_telegram_status_uses_configured_timezone(tmp_path, monkeypatch, tz, expected):
-    from aiogram import Dispatcher
 
-    from immich_chat_importer.adapters.telegram.bot import run_bot
-    from immich_chat_importer.config import Settings
     from immich_chat_importer.state import State
 
-    monkeypatch.setenv("TZ", tz)
     monkeypatch.setattr("immich_chat_importer.state._timestamp", lambda: "2026-10-31 19:14:23")
-    settings = Settings(
-        _env_file=None,
-        immich_url="https://immich.test",
-        immich_api_key="test-key",
-        telegram_bot_token="123456:test-token",
-        telegram_api_id=12345,
-        telegram_api_hash="test-hash",
-        telegram_allowed_user_ids=[42],
-        data_dir=tmp_path,
-    )
     state = State()
     await state.create_ingest_record(42, "1", "10", platform="telegram")
     replies = []
@@ -81,14 +67,10 @@ async def test_telegram_status_uses_configured_timezone(tmp_path, monkeypatch, t
         reply=reply,
     )
 
-    async def poll(dispatcher, bot, **kwargs):
-        handler = next(
-            h for h in dispatcher.message.handlers if h.callback.__name__ == "cmd_status"
-        )
-        await handler.callback(message)
+    from immich_chat_importer.adapters.telegram.bot import handle_telegram_status
+    from immich_chat_importer.batches import IngestBatches
 
-    monkeypatch.setattr(Dispatcher, "start_polling", poll)
-    await run_bot(settings, SimpleNamespace(state=state))
+    await handle_telegram_status(message, IngestBatches(SimpleNamespace(state=state)), "en", tz)
     assert expected in replies[0]
 
 
@@ -231,9 +213,8 @@ async def test_extract_ingest_item_preserves_media_extension(
     cached_name: str,
     expected_suffix: str,
 ) -> None:
-    from aiogram.types import Message
-
     from immich_chat_importer.adapters.telegram.bot import _extract_ingest_item
+    from immich_chat_importer.adapters.telegram.message import Message
     from immich_chat_importer.config import Settings
 
     cached = tmp_path / cached_name
@@ -248,7 +229,7 @@ async def test_extract_ingest_item_preserves_media_extension(
         "file_name": original_name,
         "mime_type": mime_type,
     }
-    message = Message.model_validate(
+    message = Message.from_payload(
         {
             "message_id": 341,
             "date": 1792573200,
@@ -345,14 +326,13 @@ def test_large_summary_is_split_into_valid_telegram_messages() -> None:
 async def test_extract_ingest_item_preserves_document_extension(
     tmp_path: Path, original_name: str, template: str, expected: str
 ) -> None:
-    from aiogram.types import Message
-
     from immich_chat_importer.adapters.telegram.bot import _extract_ingest_item
+    from immich_chat_importer.adapters.telegram.message import Message
     from immich_chat_importer.config import Settings
 
     cached = tmp_path / "file_0"
     cached.touch()
-    message = Message.model_validate(
+    message = Message.from_payload(
         {
             "message_id": 42,
             "date": 1792573200,
@@ -382,12 +362,12 @@ async def test_telegram_media_import_records_result_before_reply(
     tmp_path, monkeypatch, retrieval_error
 ):
     from datetime import UTC, datetime
+    from types import SimpleNamespace as File
     from unittest.mock import AsyncMock
 
-    from aiogram import Bot, Dispatcher
-    from aiogram.types import File, Message
-
     from immich_chat_importer.adapters.telegram.bot import run_bot
+    from immich_chat_importer.adapters.telegram.client import TelegramClient as Bot
+    from immich_chat_importer.adapters.telegram.message import Message
     from immich_chat_importer.batches import IngestBatches
     from immich_chat_importer.config import Settings
     from immich_chat_importer.pipeline import IngestionPipeline
@@ -403,14 +383,12 @@ async def test_telegram_media_import_records_result_before_reply(
             bundle.write(photo, "photo.jpg")
             bundle.writestr("notes.txt", "skipped content")
         photo = archive
-    from aiogram.exceptions import TelegramNetworkError, TelegramRetryAfter
-    from aiogram.methods import GetFile
+    from immich_chat_importer.adapters.telegram.errors import TelegramError
 
-    method = GetFile(file_id="file")
     error = (
-        TelegramNetworkError(method=method, message="temporary")
+        TelegramError(0, "temporary")
         if retrieval_error == "network"
-        else TelegramRetryAfter(method=method, message="rate limited", retry_after=2)
+        else TelegramError(429, "rate limited", 2)
     )
     retrieval = AsyncMock(
         side_effect=[
@@ -429,6 +407,9 @@ async def test_telegram_media_import_records_result_before_reply(
     immich.upload_asset.return_value = {"id": "asset", "status": "created"}
     pipeline = IngestionPipeline(immich, State())
     batches = IngestBatches(pipeline)
+    import asyncio
+
+    delivered = asyncio.Event()
     replies = []
 
     async def reply(message, text, **kwargs):
@@ -438,10 +419,11 @@ async def test_telegram_media_import_records_result_before_reply(
         if retrieval_error == "archive":
             assert "notes.txt" in text
         replies.append(text)
+        delivered.set()
         raise RuntimeError("reply delivery failed")
 
     monkeypatch.setattr(Message, "reply", reply)
-    message = Message.model_validate(
+    message = Message.from_payload(
         {
             "message_id": 1,
             "date": datetime.now(UTC),
@@ -451,11 +433,11 @@ async def test_telegram_media_import_records_result_before_reply(
         }
     )
 
-    async def poll(dispatcher, bot, **kwargs):
-        handler = next(h for h in dispatcher.message.handlers if h.callback.__name__ == "on_media")
-        await handler.callback(message)
+    async def updates(client):
+        yield {"message": {k: v for k, v in vars(message).items() if k != "_bot"}}
+        await asyncio.wait_for(delivered.wait(), 5)
 
-    monkeypatch.setattr(Dispatcher, "start_polling", poll)
+    monkeypatch.setattr(Bot, "updates", updates)
     settings = Settings.model_construct(
         immich_url="https://immich.test",
         telegram_bot_token="123456:test-token",

@@ -2,20 +2,11 @@ import asyncio
 import html
 import logging
 import mimetypes
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager, suppress
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
-
-from aiogram import BaseMiddleware, Bot, Dispatcher, F
-from aiogram.client.default import DefaultBotProperties
-from aiogram.client.session.aiohttp import AiohttpSession
-from aiogram.client.telegram import TelegramAPIServer
-from aiogram.enums import ParseMode
-from aiogram.filters import Command
-from aiogram.types import Message, TelegramObject
 
 from ...batches import IngestBatches, IngestRequest, Preparation
 from ...config import Settings
@@ -31,35 +22,14 @@ from ...naming import (
 from ...pipeline import IngestionPipeline, IngestItem, IngestSummary
 from ...retry import retry
 from ...runtime import ingestion_runtime
+from .client import TelegramClient
 from .errors import failure_kind, retry_delay
+from .message import Message
 from .metadata import extract_metadata
 
 log = logging.getLogger(__name__)
 
 _MEDIA_GROUP_DEBOUNCE = 1.5
-
-
-class WhitelistMiddleware(BaseMiddleware):
-    def __init__(self, allowed: set[int]) -> None:
-        self.allowed = allowed
-
-    async def __call__(
-        self,
-        handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]],
-        event: TelegramObject,
-        data: dict[str, Any],
-    ) -> Any:
-        if not isinstance(event, Message):
-            return await handler(event, data)
-        user = event.from_user
-        if user is None or user.id not in self.allowed:
-            log.info(
-                "Ignoring message from non-whitelisted user id=%s username=%s",
-                user.id if user else None,
-                user.username if user else None,
-            )
-            return None
-        return await handler(event, data)
 
 
 def _sender_language_code(message: Message) -> str | None:
@@ -161,7 +131,7 @@ def _media_info_for(message: Message) -> tuple[str | None, str, str, str]:
     return None, "", "", ""
 
 
-async def _resolve_local_path(bot: Bot, file_id: str, telegram_files_dir: Path) -> Path:
+async def _resolve_local_path(bot: TelegramClient, file_id: str, telegram_files_dir: Path) -> Path:
     """Locate a file exposed by the local Bot API through the shared volume."""
     tg_file = await retry(lambda: bot.get_file(file_id), "download", delay_for=retry_delay)
     if tg_file.file_path is None:
@@ -177,7 +147,7 @@ async def _resolve_local_path(bot: Bot, file_id: str, telegram_files_dir: Path) 
 
 
 async def _extract_ingest_item(
-    bot: Bot,
+    bot: TelegramClient,
     message: Message,
     telegram_files_dir: Path,
     settings: Settings | None = None,
@@ -341,20 +311,21 @@ async def run_bot(settings: Settings, pipeline: IngestionPipeline | None = None)
             await run_bot(settings, shared_pipeline)
         return
 
-    session = AiohttpSession(
-        api=TelegramAPIServer.from_base(settings.telegram_api_base, is_local=True),
-    )
-    bot = Bot(
-        token=settings.telegram_bot_token,
-        session=session,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-    )
-    dp = Dispatcher()
-    dp.message.middleware(WhitelistMiddleware(set(settings.telegram_allowed_user_ids)))
+    bot = TelegramClient(settings.telegram_bot_token, settings.telegram_api_base)
+    allowed = set(settings.telegram_allowed_user_ids)
+    tasks: set[asyncio.Task[None]] = set()
 
-    groups: dict[str, list[Message]] = {}
-    group_tasks: dict[str, asyncio.Task[None]] = {}
-    active_groups: set[asyncio.Task[None]] = set()
+    def track(task: asyncio.Task[None]) -> None:
+        tasks.add(task)
+        task.add_done_callback(completed)
+
+    def completed(task: asyncio.Task[None]) -> None:
+        tasks.discard(task)
+        if not task.cancelled() and (error := task.exception()) is not None:
+            log.error("Telegram message handling failed: %s", error)
+
+    groups: dict[tuple[int, str], list[Message]] = {}
+    group_tasks: dict[tuple[int, str], asyncio.Task[None]] = {}
     group_lock = asyncio.Lock()
 
     async def _process_messages(messages: list[Message]) -> None:
@@ -421,7 +392,7 @@ async def run_bot(settings: Settings, pipeline: IngestionPipeline | None = None)
         except Exception:
             log.exception("Telegram reply failed")
 
-    async def _flush_group(mg_id: str) -> None:
+    async def _flush_group(mg_id: tuple[int, str]) -> None:
         try:
             await asyncio.sleep(_MEDIA_GROUP_DEBOUNCE)
         except asyncio.CancelledError:
@@ -433,42 +404,34 @@ async def run_bot(settings: Settings, pipeline: IngestionPipeline | None = None)
             messages.sort(key=lambda m: m.message_id)
             await _process_messages(messages)
 
-    @dp.message(Command("start"))
     async def cmd_start(message: Message) -> None:
         sender_lang = _sender_language_code(message)
         await message.reply(
             t("start", lang_code=sender_lang, default_lang=settings.default_language)
         )
 
-    @dp.message(Command("help"))
     async def cmd_help(message: Message) -> None:
         sender_lang = _sender_language_code(message)
         await message.reply(
             t("help", lang_code=sender_lang, default_lang=settings.default_language)
         )
 
-    @dp.message(Command("status"))
     async def cmd_status(message: Message) -> None:
         await handle_telegram_status(
             message, IngestBatches(pipeline), settings.default_language, settings.tz
         )
 
-    media_filter = F.photo | F.video | F.document | F.animation | F.audio | F.voice | F.video_note
-
-    @dp.message(media_filter)
     async def on_media(message: Message) -> None:
         if message.media_group_id:
+            key = (message.chat.id, message.media_group_id)
             async with group_lock:
-                groups.setdefault(message.media_group_id, []).append(message)
-                existing = group_tasks.get(message.media_group_id)
+                groups.setdefault(key, []).append(message)
+                existing = group_tasks.get(key)
                 if existing:
                     existing.cancel()
-                group_tasks[message.media_group_id] = asyncio.create_task(
-                    _flush_group(message.media_group_id)
-                )
-                task = group_tasks[message.media_group_id]
-                active_groups.add(task)
-                task.add_done_callback(active_groups.discard)
+                group_tasks[key] = asyncio.create_task(_flush_group(key))
+                task = group_tasks[key]
+                track(task)
             return
         await _process_messages([message])
 
@@ -478,12 +441,26 @@ async def run_bot(settings: Settings, pipeline: IngestionPipeline | None = None)
         settings.telegram_album_name,
         settings.immich_url,
     )
+
+    async def dispatch(message: Message) -> None:
+        if message.from_user is None or message.from_user.id not in allowed:
+            return
+        text = message.text or message.caption or ""
+        command = text.split(maxsplit=1)[0] if text.startswith("/") else ""
+        name, _, recipient = command.partition("@")
+        commands = {"/start": cmd_start, "/help": cmd_help, "/status": cmd_status}
+        if name in commands and (not recipient or recipient.lower() == bot.username.lower()):
+            await commands[name](message)
+        elif _media_info_for(message)[0]:
+            await on_media(message)
+
     try:
-        await dp.start_polling(bot, handle_signals=True, close_bot_session=False)
+        async for update in bot.updates():
+            if "message" in update:
+                track(asyncio.create_task(dispatch(Message.from_payload(update["message"], bot))))
     finally:
-        # Finish cancellation before closing resources used by ingestion.
-        pending = list(active_groups)
+        pending = list(tasks)
         for task in pending:
             task.cancel()
         await asyncio.gather(*pending, return_exceptions=True)
-        await bot.session.close()
+        await bot.aclose()

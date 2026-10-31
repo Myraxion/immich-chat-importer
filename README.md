@@ -325,6 +325,13 @@ docker compose up
 CI runs `ruff` lint/format, `pytest`, and a Docker build smoke-test on every PR.
 Releases are cut by pushing a `vX.Y.Z` tag — that triggers a multi-arch build pushed to `ghcr.io/myraxion/immich-chat-importer`.
 
+### Runtime memory measurement
+
+Telegram uses a small HTTPX Bot API adapter. Run the isolated Linux memory probe
+with mocked endpoints using `scripts/measure_telegram_memory.py`; it exercises the
+production Telegram adapter and ingestion pipeline without contacting your accounts.
+See [measurement method and results](docs/research/http-telegram-memory.md).
+
 ## License
 
 [AGPL-3.0-only](LICENSE) — same family as Immich itself. If you run a modified version as a network service, you must offer your changes back under the same license.

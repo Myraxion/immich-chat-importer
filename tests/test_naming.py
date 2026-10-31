@@ -186,7 +186,7 @@ def test_disambiguate_filenames_preserves_stem_and_extension(
     assert disambiguate_filenames([filename, filename]) == expected
 
 
-def test_extract_metadata_from_aiogram_channel_forward() -> None:
+def test_extract_metadata_from_telegram_channel_forward() -> None:
     tz = ZoneInfo("Asia/Shanghai")
     message = MagicMock()
     message.chat.id = 1001

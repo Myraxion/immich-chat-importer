@@ -321,6 +321,12 @@ docker compose up
 每次 PR 时 CI 会自动运行 `ruff` 代码检查/格式化、`pytest` 单元测试以及 Docker 构建冒烟测试。
 发布新版本时，推送 `vX.Y.Z` 标签将自动触发多架构镜像构建并发布至 `ghcr.io/myraxion/immich-chat-importer`。
 
+### 运行时内存测量
+
+Telegram 使用精简 HTTPX Bot API 适配器。可在 Linux 镜像中运行
+`scripts/measure_telegram_memory.py`，使用模拟接口验证正式 Telegram 适配器和导入流水线，
+不会连接你的账号。详见[测量方法与结果](docs/research/http-telegram-memory.md)。
+
 ## 开源协议
 
 [AGPL-3.0-only](LICENSE) —— 与 Immich 保持一致的开源协议。如果你将修改后的版本作为网络服务运行，必须以相同协议开源你的修改。

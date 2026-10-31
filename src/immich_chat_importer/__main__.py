@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import signal
+import sys
 from importlib import import_module
 
 from .config import Settings
@@ -28,13 +30,37 @@ async def run(settings: Settings) -> None:
             await asyncio.gather(*tasks, return_exceptions=True)
 
 
+async def _serve(settings: Settings) -> None:
+    loop = asyncio.get_running_loop()
+    task = asyncio.create_task(run(settings))
+    stopping = False
+
+    def stop() -> None:
+        nonlocal stopping
+        stopping = True
+        task.cancel()
+
+    if sys.platform != "win32":
+        loop.add_signal_handler(signal.SIGTERM, stop)
+    try:
+        await task
+    except asyncio.CancelledError:
+        if not stopping:
+            raise
+    finally:
+        if sys.platform != "win32":
+            loop.remove_signal_handler(signal.SIGTERM)
+
+
 def main() -> None:
     settings = Settings()
     logging.basicConfig(
         level=settings.log_level.upper(),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    asyncio.run(run(settings))
+    # HTTPX request URLs include the Telegram token in the path.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    asyncio.run(_serve(settings))
 
 
 if __name__ == "__main__":

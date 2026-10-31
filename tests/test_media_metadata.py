@@ -66,10 +66,10 @@ async def test_naming_and_upload_share_one_inspection(
     from types import SimpleNamespace
 
     import httpx
-    from aiogram.types import Message
 
     from immich_chat_importer.adapters.discord.bot import process_import
     from immich_chat_importer.adapters.telegram.bot import _extract_ingest_item
+    from immich_chat_importer.adapters.telegram.message import Message
     from immich_chat_importer.config import Settings
     from immich_chat_importer.runtime import ingestion_runtime
 
@@ -115,7 +115,7 @@ async def test_naming_and_upload_share_one_inspection(
                 async def get_file(self, file_id):
                     return SimpleNamespace(file_path=str(path))
 
-            message = Message.model_validate(
+            message = Message.from_payload(
                 {
                     "message_id": 1,
                     "date": datetime(2026, 1, 1, tzinfo=UTC),

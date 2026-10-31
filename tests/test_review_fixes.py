@@ -25,8 +25,8 @@ async def test_discord_cancelled_download_removes_all_temporary_files(tmp_path):
     import httpx
     import pytest
 
-    from immich_chat_importer.config import Settings
     from immich_chat_importer.adapters.discord.bot import process_import
+    from immich_chat_importer.config import Settings
 
     entered = asyncio.Event()
 
@@ -62,10 +62,11 @@ async def test_discord_cancelled_download_removes_all_temporary_files(tmp_path):
 
 @pytest.mark.parametrize("stop_during_upload", [False, True])
 async def test_telegram_shared_media_and_shutdown(tmp_path, monkeypatch, stop_during_upload):
-    from aiogram import Bot, Dispatcher
-    from aiogram.types import File, Message
+    from types import SimpleNamespace as File
 
     from immich_chat_importer.adapters.telegram.bot import run_bot
+    from immich_chat_importer.adapters.telegram.client import TelegramClient as Bot
+    from immich_chat_importer.adapters.telegram.message import Message
     from immich_chat_importer.config import Settings
 
     source = tmp_path / "shared.jpg"
@@ -99,45 +100,35 @@ async def test_telegram_shared_media_and_shutdown(tmp_path, monkeypatch, stop_du
         replied.set()
 
     monkeypatch.setattr(Message, "reply", reply)
-    from aiogram.client.session.aiohttp import AiohttpSession
 
-    original_close = AiohttpSession.close
+    original_close = Bot.aclose
 
     async def close(session):
         if stop_during_upload and entered.is_set():
             assert finished.is_set(), "close session only after ingestion has stopped"
         await original_close(session)
 
-    monkeypatch.setattr(AiohttpSession, "close", close)
+    monkeypatch.setattr(Bot, "aclose", close)
 
-    async def poll(dispatcher, bot, **kwargs):
-        handler = next(
-            h.callback for h in dispatcher.message.handlers if h.callback.__name__ == "on_media"
-        )
+    async def updates(client):
         for i in [1, 2]:
-            await handler(
-                Message.model_validate(
-                    {
-                        "message_id": i,
-                        "date": datetime.now(UTC),
-                        "media_group_id": "group",
-                        "chat": {"id": 42, "type": "private"},
-                        "from": {"id": 42, "is_bot": False, "first_name": "Alice"},
-                        "document": {
-                            "file_id": "file",
-                            "file_unique_id": "unique",
-                            "file_name": "photo.jpg",
-                        },
-                    }
-                )
-            )
+            yield {
+                "message": {
+                    "message_id": i,
+                    "date": datetime.now(UTC),
+                    "media_group_id": "group",
+                    "chat": {"id": 42, "type": "private"},
+                    "from": {"id": 42, "is_bot": False, "first_name": "Alice"},
+                    "document": {
+                        "file_id": "file",
+                        "file_unique_id": "unique",
+                        "file_name": "photo.jpg",
+                    },
+                }
+            }
         await asyncio.wait_for((entered if stop_during_upload else replied).wait(), 5)
 
-        # Model aiogram's default session ownership at the external boundary.
-        if kwargs.get("close_bot_session", True):
-            await bot.session.close()
-
-    monkeypatch.setattr(Dispatcher, "start_polling", poll)
+    monkeypatch.setattr(Bot, "updates", updates)
     settings = Settings.model_construct(
         immich_url="https://immich.test",
         telegram_bot_token="123456:test-token",

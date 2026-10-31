@@ -3,9 +3,8 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from aiogram.types import Message
-
 from ...naming import MessageMetadata, split_filename
+from .message import Message
 
 
 def _extract_chat_info(chat: Any) -> tuple[str, str, str]:
