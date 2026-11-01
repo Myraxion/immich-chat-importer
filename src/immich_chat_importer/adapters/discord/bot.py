@@ -352,7 +352,7 @@ async def run_discord(settings: Settings, pipeline: IngestionPipeline | None = N
         return
     intents = discord.Intents.none()
     intents.dm_messages = True
-    bot = discord.Client(intents=intents)
+    bot = discord.Client(intents=intents, max_messages=None)
     tree = app_commands.CommandTree(bot)
     async with httpx.AsyncClient(
         timeout=httpx.Timeout(600, connect=30), follow_redirects=True
