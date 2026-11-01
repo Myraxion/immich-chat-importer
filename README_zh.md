@@ -319,7 +319,9 @@ docker compose up
 ```
 
 每次 PR 时 CI 会自动运行 `ruff` 代码检查/格式化、`pytest` 单元测试以及 Docker 构建冒烟测试。
-发布新版本时，推送 `vX.Y.Z` 标签将自动触发多架构镜像构建并发布至 `ghcr.io/myraxion/immich-chat-importer`。
+推送 `vX.Y.Z` 标签后，CI 通过才会构建 `linux/amd64` 和 `linux/arm64` 镜像，并发布至 `ghcr.io/myraxion/immich-chat-importer` 和 `docker.io/myraxion/immich-chat-importer`。Compose 默认使用 GHCR。稳定版会更新 `latest` 和版本别名；`vX.Y.Z-rc.1` 等预发布版本不会更新 `latest`。手动运行发布工作流时必须选择版本标签。发布旧稳定版也会更新版本别名和 `latest`。
+
+发布工作流需要名为 `DOCKERHUB_TOKEN` 的 GitHub Actions secret，其权限须允许推送到 Docker Hub 的 `myraxion/immich-chat-importer`。如果任一仓库推送失败，重新运行前请检查两个仓库的镜像状态。
 
 ### 运行时内存测量
 

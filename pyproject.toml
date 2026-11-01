@@ -1,6 +1,6 @@
 [project]
 name = "immich-chat-importer"
-version = "0.2.1"
+version = "0.2.2"
 description = "Self-hosted bot that imports media from Telegram and Discord into Immich."
 readme = "README.md"
 

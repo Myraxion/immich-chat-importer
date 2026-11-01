@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-11-01
+
+### Changed
+- 发布镜像同时推送到 Docker Hub 和 GHCR，Compose 默认继续使用 GHCR。
+- 发布前运行 CI；预发布版本不更新 `latest`，手动发布必须选择版本标签。
+
 ## [0.2.1] - 2026-11-01
 
 ### ⚡ Performance & Memory Optimization

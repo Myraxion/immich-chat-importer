@@ -323,7 +323,9 @@ docker compose up
 ```
 
 CI runs `ruff` lint/format, `pytest`, and a Docker build smoke-test on every PR.
-Releases are cut by pushing a `vX.Y.Z` tag — that triggers a multi-arch build pushed to `ghcr.io/myraxion/immich-chat-importer`.
+Pushing a `vX.Y.Z` tag runs CI and, if it passes, publishes `linux/amd64` and `linux/arm64` images to both `ghcr.io/myraxion/immich-chat-importer` and `docker.io/myraxion/immich-chat-importer`. Compose uses GHCR by default. Stable releases update `latest` and the version aliases; prerelease tags such as `vX.Y.Z-rc.1` do not update `latest`. A manually dispatched release must select a version tag. Releasing an older stable tag updates the aliases and `latest` too.
+
+The release workflow requires a GitHub Actions secret named `DOCKERHUB_TOKEN` with permission to push to `myraxion/immich-chat-importer` on Docker Hub. If a push to either registry fails, inspect both registries before rerunning the workflow.
 
 ### Runtime memory measurement
 
