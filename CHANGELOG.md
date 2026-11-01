@@ -7,7 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.0] - 2026-10-31
+## [0.2.1] - 2026-11-01
+
+### ⚡ Performance & Memory Optimization
+- **Telegram 适配层轻量化（移除 aiogram 依赖）**：
+  - 彻底移除庞大的 `aiogram` 框架依赖，直接基于 `httpx` 实现与 Telegram Bot API 的原生轻量 HTTP 长轮询与调用（`getMe`, `getUpdates`, `getFile`, `sendMessage` 等）。
+  - **内存占用减少约 66%**：根据实测，运行时常驻内存（RSS）从约 180 MiB 降至约 60 MiB，显著降低低配 VPS/NAS 部署环境的系统资源消耗。
+  - 保留所有既有功能、批处理导入管道、相册命名模板及本地 Bot API 大文件支持。
+- **Discord 内部消息缓存禁用**：
+  - 设置 `max_messages=None`，停用 `discord.py` 内部的消息历史环形缓存，防止长周期运行下的内存累积。
+- **Docker HEALTHCHECK 标准库轻量化**：
+  - 重写容器健康检查入口，完全采用 Python 标准库（`urllib.request`）进行端点探测，支持 `/server/ping` 及兼容回退 `/server-info/ping`。
+  - 消除每次定时健康检查冷启动加载 `pydantic`、`httpx` 与 `asyncio` 带来的额外 CPU 与内存开销。
+
+### ✨ User Experience
+- **Discord 消息菜单直达「返回原消息」链接**：
+  - 在右键消息 **Apps → 保存到 Immich** (Save to Immich) 的即时提示、分段回复与导入结果中，全量附带原消息直达文字链接（如 `[返回原消息](jump_url)` / `[Return to original message](jump_url)`）。
+  - 解决在长历史记录中右键保存媒体时客户端视图跳转到底部、打断浏览上下文的问题，点击链接即可一键跳回刚刚浏览的位置。
+  - 支持多语言客户端原生自动匹配（中文、英语、日语、俄语），并使用静默私密回复减少通知干扰。
+
+### 🧪 Tests & Tooling
+- 新增 `tests/test_telegram_http.py`，完整覆盖原生 Telegram HTTP 适配器的轮询、请求解析与网络容错。
+- 新增 `tests/test_healthcheck.py`，覆盖无外部依赖纯净度与各异常网络场景。
+- 新增 `scripts/measure_telegram_memory.py`，提供标准化的运行时内存基准测量工具。
 
 ### 🚀 Breaking Changes & Migration
 - **Telegram 配置变量统一加前缀**：为支持多平台并存，所有 Telegram 专属环境变量添加 `TELEGRAM_` 前缀（`ALLOWED_USER_IDS` → `TELEGRAM_ALLOWED_USER_IDS`、`ALBUM_NAME` → `TELEGRAM_ALBUM_NAME`、`ALBUM_NAME_TEMPLATE` → `TELEGRAM_ALBUM_NAME_TEMPLATE`、`MEDIA_NAME_TEMPLATE` → `TELEGRAM_MEDIA_NAME_TEMPLATE`、`DOCUMENT_NAME_TEMPLATE` → `TELEGRAM_DOCUMENT_NAME_TEMPLATE`）。已有部署升级时必须更新 `.env`。
