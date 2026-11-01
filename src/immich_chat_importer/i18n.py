@@ -88,6 +88,12 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "ja": "ネットワークエラー",
         "ru": "ошибка сети",
     },
+    "discord_return_to_message": {
+        "en": "Return to original message",
+        "zh": "返回原消息",
+        "ja": "元のメッセージに戻る",
+        "ru": "Вернуться к исходному сообщению",
+    },
     "discord_unauthorized": {
         "en": "You are not authorized to import media.",
         "zh": "你无权导入媒体。",

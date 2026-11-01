@@ -305,24 +305,32 @@ async def handle_menu(
     pipeline: IngestionPipeline,
     client: httpx.AsyncClient,
 ) -> None:
-    await interaction.response.defer(ephemeral=True, thinking=True)
+    lang = resolve_language(
+        str(interaction.locale) if interaction.locale else None, settings.default_language
+    )
+    return_link = f"\n\n[{t('discord_return_to_message', lang_code=lang)}]({message.jump_url})"
+    await interaction.response.send_message(
+        t("record_processing", lang_code=lang) + return_link,
+        ephemeral=True,
+        allowed_mentions=discord.AllowedMentions.none(),
+    )
     result = await process_import(
         message, interaction.user.id, settings, pipeline, client, interaction
     )
     if result is None:
         result = t(
             "discord_unauthorized",
-            lang_code=resolve_language(
-                str(interaction.locale) if interaction.locale else None, settings.default_language
-            ),
+            lang_code=lang,
         )
+    content_limit = 2000 - len(return_link)
     try:
         await interaction.edit_original_response(
-            content=result[:2000], allowed_mentions=discord.AllowedMentions.none()
+            content=result[:content_limit] + return_link,
+            allowed_mentions=discord.AllowedMentions.none(),
         )
-        for start in range(2000, len(result), 2000):
+        for start in range(content_limit, len(result), content_limit):
             await interaction.followup.send(
-                result[start : start + 2000],
+                result[start : start + content_limit] + return_link,
                 ephemeral=True,
                 allowed_mentions=discord.AllowedMentions.none(),
             )

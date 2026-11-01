@@ -90,15 +90,13 @@ async def test_forwarded_attachments_are_imported(tmp_path, monkeypatch, entrypo
     async def reply(content, **kwargs):
         replies.append(content)
 
-    async def defer(**kwargs):
-        pass
-
     async def edit_original_response(**kwargs):
         replies.append(kwargs["content"])
 
     message = SimpleNamespace(
         id=10,
         channel=SimpleNamespace(id=20),
+        jump_url="https://discord.com/channels/@me/20/10",
         author=SimpleNamespace(id=42, display_name="Alice", name="alice"),
         created_at=datetime(2026, 10, 31, tzinfo=UTC),
         content="",
@@ -144,7 +142,7 @@ async def test_forwarded_attachments_are_imported(tmp_path, monkeypatch, entrypo
                     user=SimpleNamespace(id=42),
                     locale="en-US",
                     guild_id=None,
-                    response=SimpleNamespace(defer=defer),
+                    response=SimpleNamespace(send_message=reply),
                     edit_original_response=edit_original_response,
                 )
                 await handle_menu(interaction, message, settings, pipeline, client)
@@ -153,8 +151,12 @@ async def test_forwarded_attachments_are_imported(tmp_path, monkeypatch, entrypo
     assert downloads == ["/a.jpg", "/b.mp4"]
     assert len(uploads) == 2
     assert f'filename="{channel_name or 999}_1.jpg"'.encode() in uploads[0]
-    assert "Uploaded: 2, duplicates: 0, skipped: 1, errors: 0" in replies[0]
-    assert "note.txt" in replies[0]
+    assert "Uploaded: 2, duplicates: 0, skipped: 1, errors: 0" in replies[-1]
+    assert "note.txt" in replies[-1]
+    if entrypoint == "menu":
+        link = "[Return to original message](https://discord.com/channels/@me/20/10)"
+        assert all(content.endswith(link) for content in replies)
+        assert all("/999/100" not in content for content in replies)
     assert list((tmp_path / "discord-downloads").iterdir()) == []
 
 
@@ -346,8 +348,8 @@ async def test_menu_private_response_uses_original_author_and_context(
             return IngestSummary(uploaded=1)
 
     class Response:
-        async def defer(self, **kwargs):
-            events.append(kwargs)
+        async def send_message(self, content, **kwargs):
+            events.append({"content": content, **kwargs})
 
     async def edit_original_response(**kwargs):
         events.append(kwargs)
@@ -364,6 +366,7 @@ async def test_menu_private_response_uses_original_author_and_context(
     message = SimpleNamespace(
         id=10,
         channel=SimpleNamespace(id=20),
+        jump_url=f"https://discord.com/channels/{guild_id or '@me'}/20/10",
         author=SimpleNamespace(id=99, display_name="Alice", name="alice"),
         created_at=datetime(2024, 1, 2, tzinfo=UTC),
         content="",
@@ -383,9 +386,12 @@ async def test_menu_private_response_uses_original_author_and_context(
         await handle_menu(interaction, message, settings, pipeline, client)
     assert len(await state.recent_ingest_records(42)) == 1
     assert await state.recent_ingest_records(99) == []
-    assert events[0] == {"ephemeral": True, "thinking": True}
+    link = f"[返回原消息]({message.jump_url})"
+    assert events[0]["ephemeral"] is True
+    assert events[0]["content"] == f"处理中\n\n{link}"
     assert events[1] == (f"{source}_Alice_10.jpg", source, 20)
     assert "已上传：1" in events[2]["content"]
+    assert events[2]["content"].endswith(link)
 
 
 async def test_menu_denies_caller_even_when_author_is_allowed(tmp_path):
@@ -394,8 +400,8 @@ async def test_menu_denies_caller_even_when_author_is_allowed(tmp_path):
     events = []
 
     class Response:
-        async def defer(self, **kwargs):
-            events.append(kwargs)
+        async def send_message(self, content, **kwargs):
+            events.append({"content": content, **kwargs})
 
     async def edit_original_response(**kwargs):
         events.append(kwargs["content"])
@@ -406,16 +412,70 @@ async def test_menu_denies_caller_even_when_author_is_allowed(tmp_path):
         response=Response(),
         edit_original_response=edit_original_response,
     )
-    message = SimpleNamespace(author=SimpleNamespace(id=42))
+    message = SimpleNamespace(
+        author=SimpleNamespace(id=42), jump_url="https://discord.com/channels/8/20/10"
+    )
     settings = Settings.model_construct(data_dir=tmp_path, discord_allowed_user_ids=[42])
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(lambda req: events.append(req))
     ) as client:
         await handle_menu(interaction, message, settings, None, client)
-    assert events == [
-        {"ephemeral": True, "thinking": True},
-        "You are not authorized to import media.",
-    ]
+    link = "[Return to original message](https://discord.com/channels/8/20/10)"
+    assert events[0]["ephemeral"] is True
+    assert events[0]["content"] == f"processing\n\n{link}"
+    assert events[1] == f"You are not authorized to import media.\n\n{link}"
+
+
+@pytest.mark.parametrize(
+    "locale, label",
+    [
+        ("en-US", "Return to original message"),
+        ("zh-CN", "返回原消息"),
+        ("ja", "元のメッセージに戻る"),
+        ("ru", "Вернуться к исходному сообщению"),
+    ],
+)
+async def test_menu_long_result_keeps_link_in_every_reply(monkeypatch, locale, label):
+    from immich_chat_importer.adapters.discord.bot import handle_menu
+
+    initial, edits, followups = [], [], []
+    message = SimpleNamespace(jump_url="https://discord.com/channels/8/20/10")
+    link = f"\n\n[{label}]({message.jump_url})"
+    result = "failed: photo.jpg\n" * 250
+
+    async def send_message(content, **kwargs):
+        initial.append((content, kwargs))
+
+    async def process_import(*args):
+        assert len(initial) == 1
+        assert initial[0][0].endswith(link)
+        return result
+
+    async def edit_original_response(**kwargs):
+        edits.append(kwargs)
+
+    async def followup(content, **kwargs):
+        followups.append((content, kwargs))
+
+    monkeypatch.setattr("immich_chat_importer.adapters.discord.bot.process_import", process_import)
+    interaction = SimpleNamespace(
+        user=SimpleNamespace(id=42),
+        locale=locale,
+        response=SimpleNamespace(send_message=send_message),
+        edit_original_response=edit_original_response,
+        followup=SimpleNamespace(send=followup),
+    )
+    await handle_menu(interaction, message, Settings.model_construct(), None, None)
+
+    chunks = [edits[0]["content"], *(content for content, _ in followups)]
+    assert len(chunks) > 1
+    assert all(len(content) <= 2000 and content.endswith(link) for content in chunks)
+    assert "".join(content.removesuffix(link) for content in chunks) == result
+    assert all(kwargs["ephemeral"] for _, kwargs in [*initial, *followups])
+    assert all(
+        not kwargs["allowed_mentions"].everyone
+        for kwargs in [initial[0][1], *edits, *(kwargs for _, kwargs in followups)]
+    )
 
 
 async def test_dm_imports_real_archive(tmp_path, monkeypatch):
@@ -616,9 +676,6 @@ async def test_expired_menu_reply_keeps_upload_and_status(tmp_path, monkeypatch)
     )
     responses = []
 
-    async def defer(**kwargs):
-        responses.append(kwargs)
-
     async def expired(**kwargs):
         response = SimpleNamespace(status=404, reason="Not Found")
         raise discord.NotFound(response, {"message": "Unknown interaction", "code": 10062})
@@ -633,7 +690,7 @@ async def test_expired_menu_reply_keeps_upload_and_status(tmp_path, monkeypatch)
     interaction = SimpleNamespace(
         user=author,
         locale="en-US",
-        response=SimpleNamespace(defer=defer, send_message=send),
+        response=SimpleNamespace(send_message=send),
         edit_original_response=expired,
         guild_id=None,
     )
@@ -643,6 +700,7 @@ async def test_expired_menu_reply_keeps_upload_and_status(tmp_path, monkeypatch)
         author=author,
         created_at=datetime.now(UTC),
         content="",
+        jump_url="https://discord.com/channels/@me/20/10",
         attachments=[SimpleNamespace(id=1, filename="a.jpg", size=1, url="https://cdn.test/a")],
     )
     async with original(
@@ -662,7 +720,9 @@ async def test_expired_menu_reply_keeps_upload_and_status(tmp_path, monkeypatch)
             await handle_status(interaction, settings, pipeline)
             assert "completed" in responses[-1]
             assert "Uploaded: 1" in responses[-1]
-            assert responses[0] == {"ephemeral": True, "thinking": True}
+            assert responses[0] == (
+                "processing\n\n[Return to original message](https://discord.com/channels/@me/20/10)"
+            )
             pending = await pipeline.state.create_ingest_record(42, "20", "10")
             await pipeline.state.start_ingest_record(pending)
 
@@ -718,9 +778,6 @@ async def test_restart_does_not_replay_and_manual_retry_finishes_album(tmp_path,
     )
     replies = []
 
-    async def defer(**kwargs):
-        pass
-
     async def edit(**kwargs):
         replies.append(kwargs["content"])
 
@@ -733,7 +790,7 @@ async def test_restart_does_not_replay_and_manual_retry_finishes_album(tmp_path,
         locale="en-US",
         guild_id=None,
         edit_original_response=edit,
-        response=SimpleNamespace(defer=defer, send_message=send),
+        response=SimpleNamespace(send_message=send),
     )
     message = SimpleNamespace(
         id=10,
@@ -741,6 +798,7 @@ async def test_restart_does_not_replay_and_manual_retry_finishes_album(tmp_path,
         author=author,
         created_at=datetime.now(UTC),
         content="",
+        jump_url="https://discord.com/channels/@me/20/10",
         attachments=[SimpleNamespace(id=1, filename="a.jpg", size=5, url="https://cdn.test/photo")],
     )
     async with original(transport=httpx.MockTransport(download)) as client:
