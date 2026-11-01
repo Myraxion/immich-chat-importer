@@ -1,0 +1,27 @@
+name: Sync Docker Hub overview
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - README.md
+      - .github/workflows/dockerhub-description.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Update Docker Hub overview
+        uses: peter-evans/dockerhub-description@v5
+        with:
+          username: myraxion
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: myraxion/immich-chat-importer
+          readme-filepath: ./README.md
+          enable-url-completion: true
